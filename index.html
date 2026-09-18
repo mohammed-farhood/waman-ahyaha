@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="description" content="منصة متابعة التبرعات الشهرية لكفالة الأيتام — ومن أحياها">
   <meta name="theme-color" content="#2A8FA0">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="ومن أحياها">
@@ -12,7 +13,7 @@
   <title>ومن أحياها — متابعة التبرعات</title>
   <link rel="icon" type="image/png" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
-  <link rel="stylesheet" href="css/main.css?v=11">
+  <link rel="stylesheet" href="css/main.css?v=28">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 </head>
@@ -95,16 +96,53 @@
     <div class="modal" id="modal-content"></div>
   </div>
 
-  <!-- ===== SCRIPTS ===== -->
-  <script src="js/icons.js?v=11"></script>
-  <script src="js/data.js?v=11"></script>
-  <script src="js/auth.js?v=11"></script>
+  <!-- API base: empty = same origin (production). In local dev (frontend on a different
+       port than the backend) point at the backend explicitly so POSTs don't hit the
+       static file server. -->
   <script>
-    if(localStorage.getItem('wahyaha_app_version') !== '3.3.0') {
-      localStorage.clear();
-      localStorage.setItem('wahyaha_app_version', '3.3.0');
+    (function () {
+      var h = location.hostname;
+      var p = location.port;
+      // Covers localhost/127.0.0.1 plus private LAN IPs (192.168.x.x, 10.x.x.x,
+      // 172.16-31.x.x) and mDNS ".local" hosts, so opening the site from a phone
+      // on the same WiFi via the dev machine's LAN IP still finds the backend.
+      var isLocal = h === 'localhost' || h.endsWith('.local') ||
+        /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+      // Backend listens on 7860 (matches backend/server.js and the HF Space).
+      // Use the SAME hostname the page is loaded from so cookies stay first-party —
+      // 127.0.0.1 and localhost are different sites to the browser, and SameSite=Strict
+      // cookies set by the backend on one are rejected when the page is on the other.
+      window.AL_AYN_API = (isLocal && p && p !== '7860') ? ('http://' + h + ':7860') : '';
+      window.AL_AYN_IS_LOCAL = isLocal;
+    })();
+  </script>
+
+  <!-- ===== SCRIPTS ===== -->
+  <script src="js/icons.js?v=28"></script>
+  <script src="js/errors.js?v=28"></script>
+  <script src="js/apiClient.js?v=28"></script>
+  <script src="js/syncQueue.js?v=28"></script>
+  <script src="js/data.js?v=28"></script>
+  <script src="js/auth.js?v=28"></script>
+  <script src="js/app.js?v=28"></script>
+
+  <!-- ===== QA CAPTURE WIDGET (qapture) =====
+       Dev/LAN-only: never loads on the deployed production origin.
+       Bundled with esbuild (js/vendor/qapture-standalone.js, gitignored,
+       rebuild with `npm run qa:build`) because the package's standalone
+       entry point has bare `react`/`react-dom` imports a plain
+       <script type="module"> cannot resolve without a bundler. -->
+  <script type="module">
+    if (window.AL_AYN_IS_LOCAL) {
+      Promise.all([
+        import('./js/vendor/qapture-standalone.js'),
+        import('./qa.config.js'),
+      ]).then(([, { default: qaConfig }]) => {
+        const el = document.createElement('qapture-widget');
+        el.config = qaConfig;
+        document.body.appendChild(el);
+      }).catch((err) => console.warn('[qapture] failed to load QA widget:', err));
     }
   </script>
-  <script src="js/app.js?v=11"></script>
 </body>
 </html>

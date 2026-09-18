@@ -4,3 +4,9 @@ backend/node_modules
 backend/.env
 auth_codes.json
 .DS_Store
+
+# qapture QA widget (dev-only, rebuild with `npm run qa:build`)
+js/vendor/qapture-standalone.js
+
+# graphify knowledge graph — regenerated locally by git hook
+/graphify-out/

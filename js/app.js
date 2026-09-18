@@ -1,9 +1,9 @@
 /* ============================================================
    WAMAN-AHYAHA DONATION TRACKER — MAIN APPLICATION
    ============================================================ */
-const API_BASE_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? 'http://localhost:7860'
-  : 'https://mohammed-farhood-al-ayn-backend.hf.space';
+// API base is set by index.html via window.AL_AYN_API, or falls back to same origin.
+// apiClient.js reads API.BASE from window.AL_AYN_API automatically.
+const API_BASE_URL = window.AL_AYN_API || '';
 
 const App = {
   currentView: 'landing',
@@ -16,18 +16,31 @@ const App = {
     return div.innerHTML;
   },
 
-  init() {
-    DB.seedIfEmpty();
+  async init() {
     const theme = DB.getSetting('theme', 'light');
     document.documentElement.setAttribute('data-theme', theme);
     this._updateThemeIcon();
-    console.log("WAMAN-AHYAHA App Initialized — Bot Backend on Port 3000");
+    console.log("WAMAN-AHYAHA App Initialized v4.0.0");
 
+    // Re-authenticate with server if we have a cached session
     if (Auth.isLoggedIn()) {
-      this.navigate('home');
+      const result = await Auth.bootstrap().catch(() => ({ error: 'bootstrap failed' }));
+      if (result.error === 'unauthenticated') {
+        DB.logout();
+        this.navigate('landing');
+      } else {
+        this.navigate('home');
+      }
     } else {
       this.navigate('landing');
     }
+
+    // Listen for server-side logout (401 on any request)
+    window.addEventListener('alayn:loggedOut', () => {
+      DB.logout();
+      this.navigate('landing');
+      this.toast('انتهت جلستك، يرجى تسجيل الدخول مجدداً', 'warning');
+    });
 
     document.querySelectorAll('.bottom-nav .nav-item').forEach(item => {
       item.addEventListener('click', () => this.navigate(item.dataset.view));
@@ -159,7 +172,7 @@ const App = {
     const t = document.createElement('div');
     const icons = { success: Icons.check, error: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`, warning: Icons.bell };
     t.className = `toast toast-${type}`;
-    t.innerHTML = `<span class="icon icon-sm" style="color:var(--${type==='success'?'success':type==='error'?'danger':'warning'})">${icons[type]||icons.success}</span><span class="toast-text">${msg}</span>`;
+    t.innerHTML = `<span class="icon icon-sm" style="color:var(--${type==='success'?'success':type==='error'?'danger':'warning'})">${icons[type]||icons.success}</span><span class="toast-text">${this.esc(msg)}</span>`;
     container.appendChild(t);
     setTimeout(() => t.remove(), 3200);
   },
@@ -246,8 +259,8 @@ const App = {
           <div class="card card-hover" style="margin-bottom:12px;cursor:pointer" onclick="App.navigate('login')">
             <div class="flex-between" style="margin-bottom:14px">
               <div>
-                <div class="font-bold" style="font-size:1.0625rem;color:var(--text-heading)">${g.name}</div>
-                <div class="text-sm text-muted" style="margin-top:3px">${g.university} &nbsp;·&nbsp; ${g.orphansSponsored} يتيم مكفول</div>
+                <div class="font-bold" style="font-size:1.0625rem;color:var(--text-heading)">${this.esc(g.name)}</div>
+                <div class="text-sm text-muted" style="margin-top:3px">${this.esc(g.university)} &nbsp;·&nbsp; ${g.orphansSponsored} يتيم مكفول</div>
               </div>
               <span class="badge badge-primary">${stats.completionRate}%</span>
             </div>
@@ -276,11 +289,11 @@ const App = {
           </div>
           <div class="form-group">
             <label class="form-label">رقم الهاتف</label>
-            <input type="tel" id="login-phone" class="form-input" placeholder="07xxxxxxxxx" dir="ltr" style="text-align:center;font-size:1.1rem;letter-spacing:2px">
+            <input type="tel" id="login-phone" class="form-input" placeholder="07xxxxxxxxx" dir="ltr" style="text-align:center;font-size:1.1rem;letter-spacing:2px" onkeyup="if(event.key==='Enter')App.handleLogin()">
           </div>
           <div id="pin-group" class="form-group hidden" style="margin-top:16px;">
-            <label class="form-label">رمز الدخول (PIN)</label>
-            <input type="password" id="login-pin" class="form-input" placeholder="****" maxlength="4" style="text-align:center;font-size:1.5rem;letter-spacing:8px" onkeyup="if(event.key==='Enter')App.handleLogin()">
+            <label class="form-label">رمز الدخول / كلمة المرور</label>
+            <input type="password" id="login-pin" class="form-input" placeholder="••••" maxlength="20" autocomplete="current-password" style="text-align:center;font-size:1.25rem;letter-spacing:4px" onkeyup="if(event.key==='Enter')App.handleLogin()">
           </div>
           <button class="btn btn-primary w-full btn-lg" onclick="App.handleLogin()">
             <span class="icon icon-sm">${Icons.shield}</span>دخول
@@ -290,18 +303,11 @@ const App = {
           <div style="text-align:center;margin-top:16px">
             <button class="btn btn-ghost btn-sm" onclick="App.navigate('landing')">العودة للرئيسية</button>
           </div>
-          <div style="background:var(--primary-bg);border-radius:var(--r-md);padding:14px;margin-top:20px;font-size:.8125rem;color:var(--text-muted)">
-            <strong style="color:var(--primary);display:block;margin-bottom:6px">حسابات تجريبية:</strong>
-            مدير عام: <span style="font-family:monospace;color:var(--text-heading)">${DB.SUPER_ADMIN_PHONE}</span> (PIN: 1432)<br>
-            مسؤول: <span style="font-family:monospace;color:var(--text-heading)">07801234567</span> (PIN: 0000)<br>
-            جامع: <span style="font-family:monospace;color:var(--text-heading)">07811234567</span> (PIN: 0000)<br>
-            متبرع: <span style="font-family:monospace;color:var(--text-heading)">07901234567</span> (بدون رمز)
-          </div>
         </div>
       </div>`;
   },
 
-  handleLogin() {
+  async handleLogin() {
     const phone = document.getElementById('login-phone').value.trim();
     if (!phone) return this.toast('الرجاء إدخال رقم الهاتف', 'error');
 
@@ -312,8 +318,8 @@ const App = {
 
     if (isPinVisible && !pin) return this.toast('الرجاء إدخال رمز الدخول', 'error');
 
-    const result = Auth.login(phone, pin);
-    
+    const result = await Auth.login(phone, pin);
+
     if (result.success) {
       this.toast(`مرحباً، ${result.user.name}`);
       this.navigate('home');
@@ -323,18 +329,33 @@ const App = {
         pinGroup.classList.remove('hidden');
         pinInput.focus();
       }
-    } else if (result.error === 'not_found') {
-      this.toast('رقم الهاتف غير مسجل', 'error');
-    } else if (result.error === 'wrong_pin') {
-      this.toast('رمز الدخول غير صحيح', 'error');
+    } else {
+      // err.message is already translated to Arabic by apiClient → Errors.t.
+      // The server intentionally returns a single generic credentials message so
+      // attackers can't probe which phones exist (see backend/routes/auth.js).
+      this.toast(result.error || 'فشل تسجيل الدخول', 'error');
+      const phoneInput = document.getElementById('login-phone');
+      if (phoneInput) phoneInput.disabled = false;
     }
   },
 
   // ─────────────────────────────────────────────────────────
   // REGISTER
   // ─────────────────────────────────────────────────────────
-  renderRegister() {
+  async renderRegister() {
     const view = this._show('view-register');
+    // Pull a fresh list from the server (donor may not be logged in yet, so local
+    // cache is empty). The endpoint is public; if it fails, fall back to cache.
+    try {
+      const r = await API.get('/api/groups');
+      if (r?.groups) {
+        const groupsMap = {};
+        r.groups.forEach(g => {
+          groupsMap[g.id] = { ...g, orphansSponsored: g.orphans_sponsored, costPerOrphan: g.cost_per_orphan, monthlyGoal: g.monthly_goal };
+        });
+        DB._set(DB.KEYS.GROUPS, groupsMap);
+      }
+    } catch (_) { /* offline — use whatever's cached */ }
     const groups = DB.getAllGroupsList();
     view.innerHTML = `
       <div class="auth-page">
@@ -356,7 +377,7 @@ const App = {
             <label class="form-label">المجموعة الجامعية</label>
             <select id="reg-group" class="form-input form-select" onchange="App._updateRegCollectors()">
               <option value="">— اختر مجموعة —</option>
-              ${groups.map(g=>`<option value="${g.id}">${g.name}</option>`).join('')}
+              ${groups.map(g=>`<option value="${g.id}">${this.esc(g.name)}</option>`).join('')}
             </select>
           </div>
           <div class="form-group" id="reg-collector-group" style="display:none">
@@ -401,10 +422,10 @@ const App = {
     const collectors = DB.getCollectorsByGroup(groupId);
     colGroup.style.display = collectors.length > 0 ? '' : 'none';
     colSelect.innerHTML = '<option value="">— بدون تعيين —</option>' +
-      collectors.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      collectors.map(c => `<option value="${c.id}">${App.esc(c.name)}</option>`).join('');
   },
 
-  handleRegister() {
+  async handleRegister() {
     const name = document.getElementById('reg-name').value.trim();
     const phone = document.getElementById('reg-phone').value.trim();
     const groupId = document.getElementById('reg-group').value;
@@ -413,10 +434,15 @@ const App = {
     const colSelectEl = document.getElementById('reg-collector');
     const collectorId = colSelectEl ? colSelectEl.value || null : null;
     if (!name || !phone || !groupId) return this.toast('الرجاء ملء جميع الحقول', 'error');
+    if (name.length < 2) return this.toast('الاسم يجب أن يكون حرفين على الأقل', 'error');
     if (Object.values(DB.getUsers()).find(u => u.phone === phone)) return this.toast('رقم الهاتف مسجل مسبقاً', 'error');
-    Auth.registerDonor({ name, phone, groupId, amount, isAnonymous, collectorId });
-    this.toast('تم التسجيل بنجاح');
-    this.navigate('home');
+    try {
+      await Auth.registerDonor({ name, phone, groupId, amount, isAnonymous, collectorId });
+      this.toast('تم التسجيل بنجاح');
+      this.navigate('home');
+    } catch (err) {
+      this.toast(err.message || 'فشل التسجيل', 'error');
+    }
   },
 
   // ─────────────────────────────────────────────────────────
@@ -489,7 +515,7 @@ const App = {
           return `
             <div style="margin-bottom:12px">
               <div class="flex-between text-sm" style="margin-bottom:4px">
-                <span style="font-weight:600">${c.name}</span>
+                <span style="font-weight:600">${this.esc(c.name)}</span>
                 <span style="color:var(--primary);font-weight:700">${cPaid}/${cDonors.length}</span>
               </div>
               <div class="progress" style="height:6px;background:var(--border)"><div class="progress-bar" style="width:${cPct}%"></div></div>
@@ -538,11 +564,11 @@ const App = {
         <div class="card fade-up" style="margin-bottom:16px;background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);border:none;color:white;cursor:pointer" onclick="App.navigate('profile')">
           <div style="display:flex;align-items:center;gap:14px;justify-content:space-between">
             <div style="display:flex;align-items:center;gap:14px">
-              <div class="avatar avatar-lg" style="background:rgba(255,255,255,.2);color:white;border-color:rgba(255,255,255,.3);font-size:1.1rem;font-weight:800">${user.name?user.name[0]:'م'}</div>
+              <div class="avatar avatar-lg" style="background:rgba(255,255,255,.2);color:white;border-color:rgba(255,255,255,.3);font-size:1.1rem;font-weight:800">${user.name?this.esc(user.name[0]):'م'}</div>
               <div>
                 <div style="font-size:.8125rem;opacity:.8;font-weight:500">مرحباً</div>
-                <div style="font-size:1.2rem;font-weight:800">${user.name}</div>
-                <div style="font-size:.8125rem;opacity:.8">${group.name} &nbsp;·&nbsp; ${roleLabel}</div>
+                <div style="font-size:1.2rem;font-weight:800">${this.esc(user.name)}</div>
+                <div style="font-size:.8125rem;opacity:.8">${this.esc(group.name)} &nbsp;·&nbsp; ${roleLabel}</div>
               </div>
             </div>
             <div style="background:rgba(255,255,255,.2);padding:6px 10px;border-radius:var(--r-sm);font-size:.8rem;font-weight:700">
@@ -626,12 +652,17 @@ const App = {
       totalPaid += stats.paidCount;
       totalAmount += stats.totalAmount;
       return `
-        <div class="card card-hover" style="margin-bottom:12px;cursor:pointer;border-right:4px solid var(--primary)"
+        <div class="card card-hover" style="margin-bottom:12px;cursor:pointer;border-right:4px solid var(--primary);position:relative"
              onclick="App.superAdminViewGroup('${g.id}')">
+          <button title="إعدادات الحملة"
+                  onclick="event.stopPropagation(); App.showCampaignSettingsModal('${g.id}')"
+                  style="position:absolute;top:8px;left:8px;background:transparent;border:none;cursor:pointer;opacity:.35;padding:4px;color:var(--text-muted);width:28px;height:28px;display:flex;align-items:center;justify-content:center">
+            ${Icons.settings}
+          </button>
           <div class="flex-between" style="margin-bottom:10px">
             <div>
-              <div class="font-bold" style="font-size:1rem;color:var(--text-heading)">${g.name}</div>
-              <div class="text-sm text-muted" style="margin-top:3px">${g.university} &nbsp;·&nbsp; <span style="cursor:pointer;color:var(--primary)" onclick="event.stopPropagation(); App._getEffectiveGroupId = () => '${g.id}'; App.navigate('orphans')">${DB.getOrphansByGroup(g.id).length} يتيم مكفول</span></div>
+              <div class="font-bold" style="font-size:1rem;color:var(--text-heading)">${this.esc(g.name)}</div>
+              <div class="text-sm text-muted" style="margin-top:3px">${this.esc(g.university)} &nbsp;·&nbsp; <span style="cursor:pointer;color:var(--primary)" onclick="event.stopPropagation(); App._getEffectiveGroupId = () => '${g.id}'; App.navigate('orphans')">${DB.getOrphansByGroup(g.id).length} يتيم مكفول</span></div>
             </div>
             <span class="badge ${stats.completionRate>=100?'badge-success':'badge-primary'}">${stats.completionRate}%</span>
           </div>
@@ -705,6 +736,13 @@ const App = {
     if (this._gridFilterCollectorId && this._gridFilterCollectorId !== 'ALL') {
       dbDonors = dbDonors.filter(d => d.collectorId === this._gridFilterCollectorId);
     }
+    if (this._gridFilterStatus && user.role !== 'donor') {
+      const curM = months[0];
+      dbDonors = dbDonors.filter(d => {
+        const s = DB.getDonationStatus(group.id, curM, d.id);
+        return this._gridFilterStatus === 'paid' ? !!s?.paid : !s?.paid;
+      });
+    }
     const donors = dbDonors;
 
     const rows = donors.map(d => {
@@ -721,7 +759,7 @@ const App = {
       }
 
       const colName = ((user.role === 'admin' || user.role === 'superadmin') && d.collectorId) ? (DB.getUser(d.collectorId)?.name || '') : '';
-      const colBadge = colName ? `<div class="text-xs" style="color:var(--primary);margin-top:3px;font-weight:600">مسؤول: ${colName}</div>` : '';
+      const colBadge = colName ? `<div class="text-xs" style="color:var(--primary);margin-top:3px;font-weight:600">مسؤول: ${this.esc(colName)}</div>` : '';
 
       // If unpaid, show a "How to pay" link
       let payAction = '';
@@ -745,17 +783,17 @@ const App = {
         const titleName = (canEdit) ? d.name : displayName;
 
         return canEdit
-          ? `<td class="cell-action" onclick="App.toggleDonation('${group.id}','${m}','${d.id}',${d.amount||5000})" title="${paid?'إلغاء':'تأكيد تبرع'} ${titleName}">${cellHtml}</td>`
+          ? `<td class="cell-action" onclick="App.toggleDonation('${group.id}','${m}','${d.id}',${d.amount||5000})" title="${paid?'إلغاء':'تأكيد تبرع'} ${this.esc(titleName)}">${cellHtml}</td>`
           : `<td>${cellHtml}</td>`;
       }).join('');
-      
-      return `<tr><td><div style="font-weight:600">${displayName}</div>${colBadge}${payAction}<div class="text-xs text-muted" style="margin-top:2px">${this.fmt(d.amount||5000)} د.ع</div></td>${cells}</tr>`;
+
+      return `<tr><td><div style="font-weight:600">${this.esc(displayName)}</div>${colBadge}${payAction}<div class="text-xs text-muted" style="margin-top:2px">${this.fmt(d.amount||5000)} د.ع</div></td>${cells}</tr>`;
     }).join('');
 
     let headerControls = '';
     if (user.role === 'admin' || user.role === 'superadmin') {
       const dbCollectors = DB.getCollectorsByGroup(effectiveGroupId);
-      const options = dbCollectors.map(c => `<option value="${c.id}" ${this._gridFilterCollectorId===c.id?'selected':''}>${c.name}</option>`).join('');
+      const options = dbCollectors.map(c => `<option value="${c.id}" ${this._gridFilterCollectorId===c.id?'selected':''}>${this.esc(c.name)}</option>`).join('');
       headerControls = `
         <div style="display:flex;gap:8px;margin-top:12px;margin-bottom:16px">
           <select class="form-input" style="flex:1;padding:4px 12px;cursor:pointer;font-weight:600" onchange="App._gridFilterCollectorId = this.value; App.renderGrid()">
@@ -776,7 +814,7 @@ const App = {
         <div style="margin-bottom:16px">
           <label class="form-label text-sm text-muted" style="display:block;margin-bottom:4px">اختر الحملة (للمدير العام):</label>
           <select class="form-input form-select" onchange="App.superAdminViewGroup(this.value)">
-            ${allGroups.map(g => `<option value="${g.id}" ${g.id===effectiveGroupId?'selected':''}>${g.name}</option>`).join('')}
+            ${allGroups.map(g => `<option value="${g.id}" ${g.id===effectiveGroupId?'selected':''}>${this.esc(g.name)}</option>`).join('')}
           </select>
         </div>`;
     }
@@ -806,9 +844,22 @@ const App = {
           </table>
         </div>
 
-        <div style="margin-top:16px;display:flex;gap:20px;flex-wrap:wrap;font-size:.8125rem">
-          <div style="display:flex;align-items:center;gap:8px"><div class="check-icon paid" style="width:24px;height:24px">${Icons.check}</div> تبرّع</div>
-          <div style="display:flex;align-items:center;gap:8px"><div class="check-icon unpaid" style="width:24px;height:24px">${Icons.circle}</div> لم يتبرع بعد</div>
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+          ${user.role !== 'donor' ? (() => {
+            const pA = this._gridFilterStatus === 'paid';
+            const uA = this._gridFilterStatus === 'unpaid';
+            return `
+          <button onclick="App._toggleGridFilter('paid')" style="display:flex;align-items:center;gap:7px;padding:6px 14px;border-radius:999px;cursor:pointer;border:2px solid ${pA?'var(--success)':'var(--border)'};background:${pA?'var(--success-bg)':'var(--surface)'};opacity:${uA?'0.35':'1'};font-size:.8rem;font-weight:${pA?'700':'500'};transition:opacity .15s,border-color .15s,background .15s">
+            <div class="check-icon paid" style="width:18px;height:18px">${Icons.check}</div>
+            <span style="color:${pA?'var(--success)':'var(--text-body)'}">تبرّع</span>
+          </button>
+          <button onclick="App._toggleGridFilter('unpaid')" style="display:flex;align-items:center;gap:7px;padding:6px 14px;border-radius:999px;cursor:pointer;border:2px solid ${uA?'var(--danger)':'var(--border)'};background:${uA?'var(--danger-bg)':'var(--surface)'};opacity:${pA?'0.35':'1'};font-size:.8rem;font-weight:${uA?'700':'500'};transition:opacity .15s,border-color .15s,background .15s">
+            <div class="check-icon unpaid" style="width:18px;height:18px">${Icons.circle}</div>
+            <span style="color:${uA?'var(--danger)':'var(--text-body)'}">لم يتبرع بعد</span>
+          </button>`;
+          })() : `
+          <div style="display:flex;align-items:center;gap:7px;font-size:.8rem"><div class="check-icon paid" style="width:18px;height:18px">${Icons.check}</div> تبرّع</div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:.8rem"><div class="check-icon unpaid" style="width:18px;height:18px">${Icons.circle}</div> لم يتبرع بعد</div>`}
         </div>
       </div>`;
   },
@@ -847,6 +898,11 @@ const App = {
     document.body.removeChild(link);
   },
 
+  _toggleGridFilter(status) {
+    this._gridFilterStatus = this._gridFilterStatus === status ? null : status;
+    this.renderGrid();
+  },
+
   toggleDonation(groupId, monthKey, userId, amount) {
     const cur  = DB.getDonationStatus(groupId, monthKey, userId);
     const paid = cur?.paid;
@@ -860,16 +916,13 @@ const App = {
     if (!paid) {
       const donor = DB.getUser(userId);
       if (donor && donor.telegramChatId) {
-        fetch(`${API_BASE_URL}/api/send-receipt`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': 'alayn_secret_2026_x7k9m2' },
-          body: JSON.stringify({
-            chatId: donor.telegramChatId,
-            donorName: donor.name,
-            amount: amount || 5000,
-            month: DB.getMonthLabel(monthKey),
-            collectorName: Auth.currentUser().name
-          })
+        const group = DB.getGroup(groupId);
+        API.post('/api/send-receipt', {
+          chatId: donor.telegramChatId,
+          donorName: donor.name,
+          amount: amount || 5000,
+          month: DB.getMonthLabel(monthKey),
+          collectorName: Auth.currentUser().name,
         }).catch(e => console.log('Receipt skipped:', e));
       }
     }
@@ -889,7 +942,7 @@ const App = {
           <label class="form-label">تعيين مسؤول جمع (اختياري)</label>
           <select id="add-collector-id" class="form-input" style="padding-right:12px;cursor:pointer">
             <option value="">-- بدون تعيين --</option>
-            ${collectors.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+            ${collectors.map(c => `<option value="${c.id}">${this.esc(c.name)}</option>`).join('')}
           </select>
         </div>
       `;
@@ -921,7 +974,7 @@ const App = {
       <button class="btn btn-ghost w-full" style="margin-top:8px" onclick="App.closeModal()">إلغاء</button>`);
   },
 
-  handleAddDonor() {
+  async handleAddDonor() {
     const name   = document.getElementById('add-name').value.trim();
     const phone  = document.getElementById('add-phone').value.trim();
     const amount = parseInt(document.getElementById('add-amount').value) || 5000;
@@ -947,12 +1000,9 @@ const App = {
       // Notify via Telegram if linked
       if (existingUser.telegramChatId) {
         const collector = DB.getUser(collectorId);
+        const group = DB.getGroup(effectiveGroupId);
         const msg = `مرحباً ${existingUser.name}،\n\nتم إضافتك إلى قائمة المتبرعين التابعة لمسؤول الجمع: ${collector?.name || 'غير محدد'}.\nإدارة تطبيق ومن أحياها`;
-        fetch(`${API_BASE_URL}/api/send-reminders`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': 'alayn_secret_2026_x7k9m2' },
-          body: JSON.stringify({ messages: [{ chatId: existingUser.telegramChatId, text: msg }] })
-        }).catch(() => {});
+        API.post('/api/send-reminders', { messages: [{ chatId: existingUser.telegramChatId, text: msg }] }).catch(() => {});
       }
 
       DB.setCurrentUser(user.id);
@@ -960,10 +1010,15 @@ const App = {
       this.toast(`تم ربط ${existingUser.name} بهذا المسؤول ✓`);
     } else {
       // New user — register fresh
-      Auth.registerDonor({ name, phone, groupId: effectiveGroupId, collectorId, amount, isAnonymous });
-      DB.setCurrentUser(user.id);
-      this.closeModal();
-      this.toast('تمت إضافة المتبرع');
+      try {
+        await Auth.registerDonor({ name, phone, groupId: effectiveGroupId, collectorId, amount, isAnonymous });
+        DB.setCurrentUser(user.id);
+        this.closeModal();
+        this.toast('تمت إضافة المتبرع');
+      } catch (err) {
+        this.toast(err.message || 'فشل إضافة المتبرع', 'error');
+        return;
+      }
     }
     this.renderGrid();
   },
@@ -980,9 +1035,9 @@ const App = {
         <div class="card" style="margin-top:16px;background:var(--primary-bg);border:1px solid var(--primary)">
           <div style="font-weight:700;color:var(--primary);margin-bottom:8px">مسؤول الجمع الخاص بك:</div>
           <div style="display:flex;align-items:center;gap:12px">
-            <div class="avatar avatar-md" style="background:var(--primary);color:white">${collector.name[0]}</div>
+            <div class="avatar avatar-md" style="background:var(--primary);color:white">${this.esc(collector.name[0])}</div>
             <div>
-              <div style="font-weight:700">${collector.name}</div>
+              <div style="font-weight:700">${this.esc(collector.name)}</div>
               <div class="text-sm text-muted">${collector.phone || 'لا يوجد رقم'}</div>
             </div>
           </div>
@@ -1017,7 +1072,7 @@ const App = {
 
     const donorOptions = allDonors
       .filter(d => d.collectorId !== user.id) // exclude own donors
-      .map(d => `<option value="${d.id}">${d.name} — ${this.fmt(d.amount||5000)} د.ع</option>`)
+      .map(d => `<option value="${d.id}">${this.esc(d.name)} — ${this.fmt(d.amount||5000)} د.ع</option>`)
       .join('');
 
     this._openModal(`
@@ -1096,7 +1151,7 @@ const App = {
     if (diff < 86400) return `منذ ${Math.floor(diff/3600)} س`;
     return `منذ ${Math.floor(diff/86400)} يوم`;
   },
-  esc(str) { return String(str||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); },
+  // NOTE: second definition removed — using the strict textContent-based esc() at line 12
 
 
   // ─────────────────────────────────────────────────────────
@@ -1281,7 +1336,7 @@ const App = {
     const donorRows = unpaid.slice(0, 10).map(d => `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
         <div>
-          <div style="font-weight:600;font-size:.9rem">${d.name}</div>
+          <div style="font-weight:600;font-size:.9rem">${this.esc(d.name)}</div>
           <div class="text-xs ${d.telegramChatId ? 'text-success' : 'text-muted'}">${d.telegramChatId ? '✓ مرتبط بالبوت' : (d.phone||'')}</div>
         </div>
         <div style="display:flex;gap:8px">
@@ -1306,7 +1361,7 @@ const App = {
       </div>
       <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--r-md);padding:14px 16px;margin-bottom:12px;font-size:.875rem;color:var(--warning)">
         <strong>مسودة رسالة التذكير:</strong>
-        <div style="margin-top:8px;white-space:pre-line;color:var(--text-body);font-size:.8125rem">${decodeURIComponent(msg)}</div>
+        <div style="margin-top:8px;white-space:pre-line;color:var(--text-body);font-size:.8125rem">${this.esc(decodeURIComponent(msg))}</div>
       </div>
       <div class="form-group" style="margin-bottom:16px">
         <label class="form-label" style="font-size:.8125rem">تعليق إضافي (يُرسل حصراً عبر البوت)</label>
@@ -1354,12 +1409,8 @@ const App = {
 
     try {
       this.toast('جاري الإرسال للمعالجة...', 'success');
-      const res = await fetch(`${API_BASE_URL}/api/send-reminders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': 'alayn_secret_2026_x7k9m2' },
-        body: JSON.stringify({ messages })
-      });
-      const data = await res.json();
+      const group = DB.getGroup(effectiveGroupId);
+      const data = await API.post('/api/send-reminders', { messages });
       if (data.success) {
         if (user && (user.role === 'superadmin' || user.role === 'admin' || user.role === 'collector')) {
           const effectiveGroupId = this._getEffectiveGroupId();
@@ -1390,15 +1441,14 @@ const App = {
     btn.disabled = true;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth-code`, { 
-        method: 'POST',
-        headers: { 'x-api-key': 'alayn_secret_2026_x7k9m2' }
-      });
-      const data = await res.json();
+      const group = DB.getGroup(this._getEffectiveGroupId());
+      const groupBotToken = group?.telegramBotToken || '';
+      const data = await API.post('/api/auth-code', {});
       if (!data.success) throw new Error('Api failed');
 
       const code = data.code;
-      const botUrl = `https://t.me/alayn_mucom_whamenahyahha_bot?start=${code}`;
+      const botUsername = data.botUsername || 'alayn_mucom_whamenahyahha_bot';
+      const botUrl = `https://t.me/${botUsername}?start=${code}`;
       
       btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.telegram}</span> بانتظار التأكيد على تليجرام...`;
 
@@ -1415,10 +1465,7 @@ const App = {
       // Poll until linked — store IDs so navigate() can cancel them
       this._tgPollInterval = setInterval(async () => {
         try {
-          const pollRes = await fetch(`${API_BASE_URL}/api/check-auth/${code}`, {
-            headers: { 'x-api-key': 'alayn_secret_2026_x7k9m2' }
-          });
-          const pollData = await pollRes.json();
+          const pollData = await API.get(`/api/check-auth/${code}`);
           if (pollData.success && pollData.status === 'linked') {
             clearInterval(this._tgPollInterval);
             clearTimeout(this._tgPollTimeout);
@@ -1463,11 +1510,11 @@ const App = {
       <div class="modal-header"><div class="modal-title">تعديل الإعلان</div></div>
       <div class="form-group">
         <label class="form-label">العنوان</label>
-        <input type="text" id="edit-ann-title" class="form-input" value="${a.title||''}">
+        <input type="text" id="edit-ann-title" class="form-input" value="${this.esc(a.title||'')}">
       </div>
       <div class="form-group">
         <label class="form-label">المحتوى</label>
-        <textarea id="edit-ann-content" class="form-input" style="min-height:120px">${a.content||''}</textarea>
+        <textarea id="edit-ann-content" class="form-input" style="min-height:120px">${this.esc(a.content||'')}</textarea>
       </div>
       <div class="form-group">
         <label class="flex-between" style="cursor:pointer">
@@ -1515,9 +1562,9 @@ const App = {
         ${lb.map((g,i) => `
           <div class="leaderboard-item rank-${i+1} fade-up delay-${Math.min(i+1,4)}">
             <div class="lb-rank">${medals[i]||i+1}</div>
-            <div class="avatar avatar-filled" style="font-size:.875rem">${g.name?g.name[0]:'م'}</div>
+            <div class="avatar avatar-filled" style="font-size:.875rem">${g.name?this.esc(g.name[0]):'م'}</div>
             <div class="lb-info">
-              <div class="lb-name">${g.name}</div>
+              <div class="lb-name">${this.esc(g.name)}</div>
               <div class="lb-detail">${this.fmt(g.totalDonors)} متبرع &nbsp;·&nbsp; ${g.orphansSponsored} يتيم</div>
             </div>
             <div class="lb-score">
@@ -1532,7 +1579,7 @@ const App = {
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
               <span style="font-weight:700;color:var(--text-muted);width:20px">${i+1}</span>
               <div style="flex:1">
-                <div style="font-weight:600;font-size:.875rem">${g.name}</div>
+                <div style="font-weight:600;font-size:.875rem">${this.esc(g.name)}</div>
                 <div class="progress" style="margin-top:4px"><div class="progress-bar" style="width:${lb[0].allTimeTotal?Math.round(g.allTimeTotal/lb[0].allTimeTotal*100):0}%"></div></div>
               </div>
               <span style="font-weight:700;color:var(--primary);font-size:.875rem">${this.fmt(g.allTimeTotal)} د.ع</span>
@@ -1561,7 +1608,7 @@ const App = {
         <div style="margin-bottom:16px">
           <label class="form-label text-sm text-muted" style="display:block;margin-bottom:4px">اختر الحملة (للمدير العام):</label>
           <select class="form-input form-select" onchange="App.superAdminViewGroup(this.value)">
-            ${allGroups.map(g => `<option value="${g.id}" ${g.id===effectiveGroupId?'selected':''}>${g.name}</option>`).join('')}
+            ${allGroups.map(g => `<option value="${g.id}" ${g.id===effectiveGroupId?'selected':''}>${this.esc(g.name)}</option>`).join('')}
           </select>
         </div>`;
     }
@@ -1600,7 +1647,7 @@ const App = {
                 <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--r-md);padding:12px;margin-bottom:8px">
                   <div class="flex-between">
                     <div>
-                      <div style="font-weight:700;color:var(--warning-dark)">⚠ دفع ${rDonor?.name || r.donorName} لـ ${rCol?.name || 'مسؤول آخر'}</div>
+                      <div style="font-weight:700;color:var(--warning-dark)">⚠ دفع ${this.esc(rDonor?.name || r.donorName)} لـ ${this.esc(rCol?.name || 'مسؤول آخر')}</div>
                       <div class="text-xs text-muted">${this.fmt(r.amount)} د.ع — ${this.timeAgo(r.createdAt)}</div>
                     </div>
                     <button class="btn btn-sm" style="background:var(--success);color:white;border:none" onclick="App.acknowledgePayReport('${r.id}','${r.donorId}')">تأكيد ✓</button>
@@ -1615,8 +1662,8 @@ const App = {
               const rOwner = DB.getUser(DB.getUser(r.donorId)?.collectorId);
               return `
                 <div style="background:var(--primary-bg);border:1px solid var(--primary);border-radius:var(--r-md);padding:12px;margin-bottom:8px;font-size:.875rem">
-                  <span style="font-weight:700">📤 استلمت من:</span> ${rDonor?.name || r.donorName} — ${this.fmt(r.amount)} د.ع
-                  <span class="text-muted"> (ينتظر تأكيد ${rOwner?.name || 'المسؤول الآخر'})</span>
+                  <span style="font-weight:700">📤 استلمت من:</span> ${this.esc(rDonor?.name || r.donorName)} — ${this.fmt(r.amount)} د.ع
+                  <span class="text-muted"> (ينتظر تأكيد ${this.esc(rOwner?.name || 'المسؤول الآخر')})</span>
                 </div>`;
             }).join('');
 
@@ -1629,7 +1676,7 @@ const App = {
                     <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--r-md);padding:12px;margin-bottom:8px">
                       <div class="flex-between">
                         <div>
-                          <div style="font-weight:700;color:var(--warning-dark)">${rDonor?.name || r.donorName} دفع لـ ${rCol?.name || '?'}</div>
+                          <div style="font-weight:700;color:var(--warning-dark)">${this.esc(rDonor?.name || r.donorName)} دفع لـ ${this.esc(rCol?.name || '?')}</div>
                           <div class="text-xs text-muted">${this.fmt(r.amount)} د.ع — ${this.timeAgo(r.createdAt)}</div>
                         </div>
                         <button class="btn btn-sm" style="background:var(--success);color:white;border:none" onclick="App.acknowledgePayReport('${r.id}','${r.donorId}')">تأكيد ✓</button>
@@ -1691,19 +1738,19 @@ const App = {
               return `
               <div class="avail-card">
                 <div class="avail-header" style="${c.liveLocation?.active ? 'border-bottom:2px solid #25D366;padding-bottom:10px;margin-bottom:10px' : ''}">
-                  <div class="avatar avatar-lg avatar-filled" style="font-size:1rem">${c.name?c.name[0]:'م'}</div>
+                  <div class="avatar avatar-lg avatar-filled" style="font-size:1rem">${c.name?this.esc(c.name[0]):'م'}</div>
                   <div style="flex:1">
-                    <div style="font-weight:700;font-size:1rem;color:var(--text-heading)">${c.name}</div>
-                    <div class="text-sm text-muted">${c.stage||''}</div>
+                    <div style="font-weight:700;font-size:1rem;color:var(--text-heading)">${this.esc(c.name)}</div>
+                    <div class="text-sm text-muted">${this.esc(c.stage||'')}</div>
                   </div>
                   <span class="badge ${paid === myDonors.length && myDonors.length > 0 ? 'badge-success' : 'badge-warning'}" style="${user.role === 'donor' ? 'display:none' : ''}">${this.fmt(paid)}/${this.fmt(myDonors.length)} متبرع</span>
                 </div>
                 ${mapHtml}
                 ${c.availability ? `
                 <div class="avail-tags">
-                  <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.calendar}</span> ${c.availability.days}</span>
+                  <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.calendar}</span> ${this.esc(c.availability.days)}</span>
                   <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.clock}</span> ${c.availability.startTime} – ${c.availability.endTime}</span>
-                  <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.mappin}</span> ${c.availability.location}</span>
+                  <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.mappin}</span> ${this.esc(c.availability.location)}</span>
                 </div>` : ''}
                 <div class="avail-actions">
                   ${c.phone ? `
@@ -1745,10 +1792,10 @@ const App = {
     view.innerHTML = `
       <div class="container">
         <div class="card fade-up" style="text-align:center;margin-bottom:16px">
-          <div class="avatar avatar-xl avatar-filled" style="margin:0 auto var(--sp-4);font-size:1.75rem">${user.name?user.name[0]:'م'}</div>
-          <h3>${user.name}</h3>
+          <div class="avatar avatar-xl avatar-filled" style="margin:0 auto var(--sp-4);font-size:1.75rem">${user.name?this.esc(user.name[0]):'م'}</div>
+          <h3>${this.esc(user.name)}</h3>
           <div style="margin-top:8px"><span class="badge badge-primary">${roleLabel}</span></div>
-          <div style="margin-top:8px;color:var(--text-muted);font-size:.9rem">${group?.name||''}</div>
+          <div style="margin-top:8px;color:var(--text-muted);font-size:.9rem">${this.esc(group?.name||'')}</div>
           ${user.phone ? `<div style="margin-top:4px;color:var(--text-muted);font-size:.85rem;direction:ltr">${user.phone}</div>` : ''}
         </div>
 
@@ -1760,9 +1807,9 @@ const App = {
           </div>
           ${user.availability ? `
             <div class="avail-tags" style="margin-bottom:16px">
-              <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.calendar}</span> ${user.availability.days}</span>
+              <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.calendar}</span> ${this.esc(user.availability.days)}</span>
               <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.clock}</span> ${user.availability.startTime} – ${user.availability.endTime}</span>
-              <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.mappin}</span> ${user.availability.location}</span>
+              <span class="avail-tag"><span class="icon icon-sm icon-primary">${Icons.mappin}</span> ${this.esc(user.availability.location)}</span>
             </div>` : `<p class="text-muted text-sm" style="margin-bottom:16px">لم تُضف أوقات تواجد بعد</p>`}
             
           <button class="btn ${user.liveLocation?.active ? 'btn-outline' : 'btn-primary'} w-full" style="margin-bottom:12px; ${user.liveLocation?.active ? 'color:var(--error);border-color:var(--error)' : 'background:#25D366;border-color:#25D366'}" onclick="App.toggleGPS(${!user.liveLocation?.active})">
@@ -1813,6 +1860,30 @@ const App = {
           </button>
         </div>` : ''}
 
+        ${user.role==='superadmin' ? `
+        <div class="card fade-up delay-3" style="margin-bottom:16px;border-top:3px solid var(--gold)">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+            <div style="width:36px;height:36px;border-radius:50%;background:var(--gold-bg);display:flex;align-items:center;justify-content:center;color:var(--gold)">${Icons.database}</div>
+            <h4 style="margin:0">النسخ الاحتياطي والبيانات</h4>
+          </div>
+
+          <button class="btn btn-primary w-full" style="margin-bottom:10px;background:var(--gold);border-color:var(--gold)" onclick="App.exportFullBackup()">
+            <span class="icon icon-sm icon-white">${Icons.download}</span> تصدير نسخة احتياطية كاملة (JSON)
+          </button>
+
+          <button class="btn btn-outline w-full" style="margin-bottom:10px" onclick="App.showExportCampaignModal()">
+            <span class="icon icon-sm">${Icons.archive}</span> تصدير بيانات حملة محددة
+          </button>
+
+          <button class="btn btn-outline w-full" style="margin-bottom:10px" onclick="App.showImportRestoreModal()">
+            <span class="icon icon-sm">${Icons.upload}</span> استيراد / استعادة البيانات
+          </button>
+
+          <button class="btn btn-ghost w-full" onclick="App.showBackupHistoryModal()">
+            <span class="icon icon-sm">${Icons.clock}</span> سجل النسخ الاحتياطية
+          </button>
+        </div>` : ''}
+
         <button class="btn btn-danger w-full fade-up delay-4" onclick="App.handleLogout()">
           <span class="icon icon-sm icon-white">${Icons.logout}</span> تسجيل الخروج
         </button>
@@ -1826,7 +1897,7 @@ const App = {
       <div class="modal-header"><div class="modal-title">تحديث أوقات التواجد</div></div>
       <div class="form-group">
         <label class="form-label">أيام التواجد</label>
-        <input type="text" id="av-days" class="form-input" placeholder="الأحد — الخميس" value="${av.days||''}">
+        <input type="text" id="av-days" class="form-input" placeholder="الأحد — الخميس" value="${this.esc(av.days||'')}">
       </div>
       <div class="form-group">
         <label class="form-label">من الساعة</label>
@@ -1838,7 +1909,7 @@ const App = {
       </div>
       <div class="form-group">
         <label class="form-label">المكان</label>
-        <input type="text" id="av-loc" class="form-input" placeholder="كلية الهندسة — الطابق الثاني" value="${av.location||''}">
+        <input type="text" id="av-loc" class="form-input" placeholder="كلية الهندسة — الطابق الثاني" value="${this.esc(av.location||'')}">
       </div>
       <button class="btn btn-primary w-full" onclick="App.handleAvailability()">حفظ</button>
       <button class="btn btn-ghost w-full" style="margin-top:8px" onclick="App.closeModal()">إلغاء</button>`);
@@ -1897,7 +1968,7 @@ const App = {
         
         ${canManage ? `
           <button class="btn btn-primary w-full" style="margin-bottom:16px" onclick="App.showAddOrphanModal()">
-            <span class="icon icon-sm">${Icons.plus}</span> إضافة يتيم للمجموعة (${groupName || ''})
+            <span class="icon icon-sm">${Icons.plus}</span> إضافة يتيم للمجموعة (${this.esc(groupName || '')})
           </button>
         ` : ''}
 
@@ -1913,19 +1984,19 @@ const App = {
               <div style="width:70px;height:70px;background:#2b9eb3;border-radius:16px;display:flex;align-items:center;justify-content:center;color:white;margin-bottom:12px">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
               </div>
-              <div style="font-weight:700;color:#2b9eb3;font-size:.85rem;text-align:center;line-height:1.4">${o.name}</div>
+              <div style="font-weight:700;color:#2b9eb3;font-size:.85rem;text-align:center;line-height:1.4">${this.esc(o.name)}</div>
               <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">${o.birthDate ? o.birthDate.replace(/-/g,'/') : ''}</div>
             </div>
             <!-- Left side (Details Grid) -->
             <div style="flex:1;padding:16px 12px;display:flex;flex-direction:column;justify-content:center;gap:8px">
               <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
-                <span style="font-weight:700;color:var(--text-heading)">الرمز : ${o.code}</span>
+                <span style="font-weight:700;color:var(--text-heading)">الرمز : ${this.esc(o.code)}</span>
               </div>
               <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
-                <span style="font-weight:700;color:var(--text-muted)">المحافظة : ${o.province}</span>
+                <span style="font-weight:700;color:var(--text-muted)">المحافظة : ${this.esc(o.province)}</span>
               </div>
               <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
-                <span style="font-weight:700;color:var(--text-muted)">نوع الكفالة : ${o.type}</span>
+                <span style="font-weight:700;color:var(--text-muted)">نوع الكفالة : ${this.esc(o.type)}</span>
               </div>
               <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
                 <span style="font-weight:700;color:var(--text-heading)">مبلغ الكفالة : <span style="color:#2b9eb3">${this.fmt(o.amount)}</span></span>
@@ -2009,19 +2080,19 @@ const App = {
       <div class="modal-header"><div class="modal-title">تعديل بيانات اليتيم</div></div>
       <div class="form-group">
         <label class="form-label">اسم اليتيم</label>
-        <input type="text" id="edit-orph-name" class="form-input" value="${o.name||''}">
+        <input type="text" id="edit-orph-name" class="form-input" value="${this.esc(o.name||'')}">
       </div>
       <div class="form-group">
         <label class="form-label">الرمز (Code)</label>
-        <input type="text" id="edit-orph-code" class="form-input" value="${o.code||''}" dir="ltr" style="text-align:right">
+        <input type="text" id="edit-orph-code" class="form-input" value="${this.esc(o.code||'')}" dir="ltr" style="text-align:right">
       </div>
       <div class="form-group">
         <label class="form-label">المحافظة</label>
-        <input type="text" id="edit-orph-prov" class="form-input" value="${o.province||''}">
+        <input type="text" id="edit-orph-prov" class="form-input" value="${this.esc(o.province||'')}">
       </div>
       <div class="form-group">
         <label class="form-label">نوع الكفالة</label>
-        <input type="text" id="edit-orph-type" class="form-input" value="${o.type||'اعتيادية'}">
+        <input type="text" id="edit-orph-type" class="form-input" value="${this.esc(o.type||'اعتيادية')}">
       </div>
       <div class="form-group">
         <label class="form-label">مبلغ الكفالة (د.ع)</label>
@@ -2088,15 +2159,19 @@ const App = {
       <button class="btn btn-ghost w-full" style="margin-top:8px" onclick="App.closeModal()">إلغاء</button>`);
   },
 
-  handleAddCollector() {
+  async handleAddCollector() {
     const name  = document.getElementById('coll-name').value.trim();
     const phone = document.getElementById('coll-phone').value.trim();
     const pin   = document.getElementById('coll-pin').value.trim() || '0000';
     const stage = document.getElementById('coll-stage').value.trim();
     if (!name||!phone) return this.toast('الرجاء ملء الحقول','error');
-    Auth.registerCollector({ name, phone, pin, groupId: this._getEffectiveGroupId(), stage });
-    this.closeModal();
-    this.toast('تمت إضافة جامع التبرعات');
+    try {
+      await Auth.registerCollector({ name, phone, pin, groupId: this._getEffectiveGroupId(), stage });
+      this.closeModal();
+      this.toast('تمت إضافة جامع التبرعات');
+    } catch (err) {
+      this.toast(err.message || 'فشل إضافة جامع التبرعات', 'error');
+    }
   },
 
   exportData() {
@@ -2108,8 +2183,201 @@ const App = {
     this.toast('تم التصدير');
   },
 
-  handleLogout() {
-    Auth.logout();
+  // ─────────────────────────────────────────────────────────────
+  // SUPERADMIN: BACKUP & DATA MANAGEMENT
+  // ─────────────────────────────────────────────────────────────
+  _downloadJSON(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  async exportFullBackup() {
+    const btn = event?.target?.closest?.('button');
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.refresh}</span> جارٍ التصدير...`; }
+    try {
+      const data = await API.get('/api/export');
+      const filename = `alayn-backup-${new Date().toISOString().slice(0,10)}.json`;
+      this._downloadJSON(data, filename);
+      const counts = data.users?.length || 0;
+      this.toast(`تم تصدير النسخة الاحتياطية (${counts} مستخدم، ${data.donations?.length || 0} تبرع)`);
+    } catch (err) {
+      this.toast(err.message || 'فشل التصدير', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.download}</span> تصدير نسخة احتياطية كاملة (JSON)`; }
+    }
+  },
+
+  showExportCampaignModal() {
+    const groups = DB.getAllGroupsList();
+    if (!groups.length) return this.toast('لا توجد حملات', 'error');
+    const options = groups.map(g => `<option value="${g.id}">${this.esc(g.name)} — ${this.esc(g.university || '')}</option>`).join('');
+    this._openModal(`
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--primary)">${Icons.archive}</span> تصدير بيانات حملة
+        </div>
+      </div>
+      <p class="text-sm text-muted" style="margin-bottom:16px">اختر الحملة لتصدير جميع بياناتها (المتبرعين، التبرعات، الأيتام، الإعلانات)</p>
+      <div class="form-group">
+        <label class="form-label">الحملة</label>
+        <select id="export-group-select" class="form-input form-select">${options}</select>
+      </div>
+      <button class="btn btn-primary w-full" id="btn-export-group" onclick="App.handleExportCampaign()">
+        <span class="icon icon-sm icon-white">${Icons.download}</span> تصدير
+      </button>
+      <button class="btn btn-ghost w-full" style="margin-top:8px" onclick="App.closeModal()">إلغاء</button>`);
+  },
+
+  async handleExportCampaign() {
+    const groupId = document.getElementById('export-group-select').value;
+    const btn = document.getElementById('btn-export-group');
+    if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التصدير...'; }
+    try {
+      const data = await API.get('/api/export/group/' + groupId);
+      const groupName = data.group?.name || 'حملة';
+      const filename = `alayn-${groupName}-${new Date().toISOString().slice(0,10)}.json`;
+      this._downloadJSON(data, filename);
+      this.closeModal();
+      this.toast(`تم تصدير بيانات "${groupName}"`);
+    } catch (err) {
+      this.toast(err.message || 'فشل التصدير', 'error');
+      if (btn) { btn.disabled = false; btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.download}</span> تصدير`; }
+    }
+  },
+
+  showImportRestoreModal() {
+    this._openModal(`
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--primary)">${Icons.upload}</span> استيراد / استعادة البيانات
+        </div>
+      </div>
+      <div style="background:var(--warning-bg);border:1px solid var(--warning);border-radius:var(--r-md);padding:12px;margin-bottom:16px">
+        <div style="display:flex;align-items:flex-start;gap:8px;color:var(--warning-dark)">
+          <span class="icon icon-sm" style="flex-shrink:0;margin-top:2px">${Icons.bell}</span>
+          <div class="text-sm">
+            <strong>تنبيه:</strong> هذه العملية ستضيف البيانات من الملف إلى قاعدة البيانات الحالية. البيانات الموجودة مسبقاً لن تتأثر (لن يتم تكرارها).
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">اختر ملف النسخة الاحتياطية (.json)</label>
+        <input type="file" id="import-file" class="form-input" accept=".json" style="padding:10px" onchange="App._previewImportFile()">
+      </div>
+      <div id="import-preview" style="display:none;background:var(--gray-50);border-radius:var(--r-md);padding:12px;margin-bottom:16px"></div>
+      <button class="btn btn-primary w-full" id="btn-do-import" disabled onclick="App.handleImportRestore()">
+        <span class="icon icon-sm icon-white">${Icons.upload}</span> استعادة البيانات
+      </button>
+      <button class="btn btn-ghost w-full" style="margin-top:8px" onclick="App.closeModal()">إلغاء</button>`);
+  },
+
+  _previewImportFile() {
+    const file = document.getElementById('import-file').files[0];
+    const preview = document.getElementById('import-preview');
+    const btn = document.getElementById('btn-do-import');
+    if (!file) { preview.style.display = 'none'; btn.disabled = true; return; }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        this._importData = data;
+        const lines = [];
+        if (data.exportDate) lines.push(`<div class="text-sm"><strong>تاريخ التصدير:</strong> ${new Date(data.exportDate).toLocaleString('ar-IQ')}</div>`);
+        if (data.version) lines.push(`<div class="text-sm"><strong>الإصدار:</strong> ${this.esc(data.version)}</div>`);
+        if (data.scope === 'group' && data.group) lines.push(`<div class="text-sm"><strong>النطاق:</strong> حملة "${this.esc(data.group.name)}"</div>`);
+        const counts = [];
+        if (data.groups) counts.push(`${Array.isArray(data.groups) ? data.groups.length : Object.keys(data.groups).length} حملة`);
+        if (data.users) counts.push(`${Array.isArray(data.users) ? data.users.length : Object.keys(data.users).length} مستخدم`);
+        if (data.donations) counts.push(`${Array.isArray(data.donations) ? data.donations.length : Object.keys(data.donations).length} تبرع`);
+        if (data.orphans) counts.push(`${data.orphans.length} يتيم`);
+        if (data.announcements) counts.push(`${data.announcements.length} إعلان`);
+        if (counts.length) lines.push(`<div class="text-sm" style="margin-top:4px"><strong>المحتوى:</strong> ${counts.join(' · ')}</div>`);
+        const sizeKB = (file.size / 1024).toFixed(1);
+        lines.push(`<div class="text-sm" style="margin-top:4px"><strong>حجم الملف:</strong> ${sizeKB} كيلوبايت</div>`);
+        if (data.checksum) lines.push(`<div class="text-xs text-muted" style="margin-top:4px;direction:ltr;font-family:monospace">SHA-256: ${data.checksum.slice(0,16)}...</div>`);
+
+        preview.innerHTML = lines.join('');
+        preview.style.display = 'block';
+        btn.disabled = false;
+      } catch {
+        preview.innerHTML = `<div class="text-sm" style="color:var(--danger)">ملف غير صالح — يجب أن يكون ملف JSON من نسخة احتياطية سابقة</div>`;
+        preview.style.display = 'block';
+        btn.disabled = true;
+        this._importData = null;
+      }
+    };
+    reader.readAsText(file);
+  },
+
+  async handleImportRestore() {
+    if (!this._importData) return this.toast('الرجاء اختيار ملف', 'error');
+    const btn = document.getElementById('btn-do-import');
+    if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الاستعادة...'; }
+    try {
+      const result = await API.post('/api/import', this._importData);
+      this._importData = null;
+      this.closeModal();
+      const s = result.imported || {};
+      this.toast(`تمت الاستعادة: ${s.users||0} مستخدم، ${s.groups||0} حملة، ${s.donations||0} تبرع، ${s.orphans||0} يتيم`);
+      await Auth.bootstrap().catch(() => {});
+      this.renderHome();
+    } catch (err) {
+      this.toast(err.message || 'فشلت عملية الاستعادة', 'error');
+      if (btn) { btn.disabled = false; btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.upload}</span> استعادة البيانات`; }
+    }
+  },
+
+  async showBackupHistoryModal() {
+    this._openModal(`
+      <div class="modal-header">
+        <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--primary)">${Icons.clock}</span> سجل النسخ الاحتياطية
+        </div>
+      </div>
+      <div id="backup-history-list" style="text-align:center;padding:24px">
+        <div class="spinner"></div>
+        <div class="text-sm text-muted" style="margin-top:8px">جارٍ التحميل...</div>
+      </div>
+      <button class="btn btn-ghost w-full" style="margin-top:8px" onclick="App.closeModal()">إغلاق</button>`);
+
+    try {
+      const backups = await API.get('/api/export/backups');
+      const container = document.getElementById('backup-history-list');
+      if (!backups.length) {
+        container.innerHTML = `<div class="text-muted text-sm" style="padding:16px;text-align:center">لا توجد نسخ احتياطية سابقة</div>`;
+        return;
+      }
+      container.innerHTML = backups.map(b => {
+        const date = new Date(b.created_at).toLocaleString('ar-IQ');
+        const sizeMB = b.size_bytes ? (b.size_bytes / (1024*1024)).toFixed(2) : '—';
+        const counts = b.record_counts || {};
+        const summary = [
+          counts.users && `${counts.users} مستخدم`,
+          counts.groups && `${counts.groups} حملة`,
+          counts.donations && `${counts.donations} تبرع`,
+        ].filter(Boolean).join(' · ');
+        return `
+          <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+            <div class="flex-between" style="margin-bottom:4px">
+              <div style="font-weight:600;font-size:.9rem">${date}</div>
+              <span class="badge ${b.type==='scheduled'?'badge-primary':'badge-default'}">${b.type==='scheduled'?'تلقائي':'يدوي'}</span>
+            </div>
+            <div class="text-sm text-muted">${summary || 'بدون تفاصيل'}</div>
+            <div class="text-xs text-muted" style="margin-top:2px">${sizeMB} ميغابايت ${b.actor_name ? '· ' + this.esc(b.actor_name) : ''}</div>
+          </div>`;
+      }).join('');
+    } catch (err) {
+      const container = document.getElementById('backup-history-list');
+      if (container) container.innerHTML = `<div class="text-sm" style="color:var(--danger);padding:16px">فشل تحميل السجل</div>`;
+    }
+  },
+
+  async handleLogout() {
+    await Auth.logout();
     this.toast('تم تسجيل الخروج');
     this.navigate('landing');
   },
@@ -2163,10 +2431,10 @@ const App = {
         <div class="card fade-up delay-3" style="margin-bottom:20px;text-align:center">
           <p class="text-muted" style="margin-bottom:12px;font-size:.9rem">أو تواصل معنا مباشرةً:</p>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-            <a href="https://wa.me/9647700000000?text=${encodeURIComponent('السلام عليكم\nأريد بدء حملة جديدة لدعم حساب العين')}" target="_blank" class="wa-btn wa-btn-whatsapp">
+            <a href="https://wa.me/9647777961845?text=${encodeURIComponent('السلام عليكم\nأريد بدء حملة جديدة لدعم حساب العين')}" target="_blank" class="wa-btn wa-btn-whatsapp">
               <span class="icon icon-sm">${Icons.whatsapp}</span> واتساب
             </a>
-            <a href="https://t.me/+9647700000000" target="_blank" class="wa-btn wa-btn-telegram">
+            <a href="https://t.me/+9647777961845" target="_blank" class="wa-btn wa-btn-telegram">
               <span class="icon icon-sm">${Icons.telegram}</span> تيليجرام
             </a>
           </div>
@@ -2285,7 +2553,7 @@ const App = {
     const user = Auth.currentUser();
     if (!user) return '';
 
-    const isAdminOrSupport = user.role === 'admin' || user.role === 'superadmin' || user.phone === DB.SUPPORT_PHONE;
+    const isAdminOrSupport = user.role === 'admin' || user.role === 'superadmin';
 
     let msgs = DB.getSupportMessages().reverse();
     if (!isAdminOrSupport) {
@@ -2303,12 +2571,12 @@ const App = {
         ${msgs.map(m => `
           <div style="background:var(--gray-50);border-radius:var(--r-sm);padding:12px;margin-bottom:10px;border:1px solid var(--border)">
             <div class="flex-between" style="margin-bottom:6px">
-              <span style="font-weight:700;font-size:.9rem;color:var(--text-heading)">${m.senderName}</span>
+              <span style="font-weight:700;font-size:.9rem;color:var(--text-heading)">${this.esc(m.senderName)}</span>
               <span class="text-xs text-muted">${this.timeAgo(m.createdAt)}</span>
             </div>
-            <p style="font-size:.9rem;color:var(--text-body);line-height:1.8;margin-bottom:8px">${m.text}</p>
+            <p style="font-size:.9rem;color:var(--text-body);line-height:1.8;margin-bottom:8px">${this.esc(m.text)}</p>
             <div class="flex-between">
-              <span class="text-xs text-muted">${m.senderPhone || 'بدون رقم'}</span>
+              <span class="text-xs text-muted">${this.esc(m.senderPhone || 'بدون رقم')}</span>
               ${isAdminOrSupport ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger);font-size:.75rem" onclick="if(confirm('حذف هذه الرسالة؟')){DB.deleteSupportMessage('${m.id}');App.renderInstitution()}">حذف</button>` : '<span></span>'}
             </div>
           </div>
@@ -2346,14 +2614,11 @@ const App = {
       const donors = DB.getUsersByCollector(user.id).filter(d => d.telegramChatId);
       if (donors.length > 0) {
         try {
-          await fetch(`${API_BASE_URL}/api/notify-location`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-api-key': 'alayn_secret_2026_x7k9m2' },
-            body: JSON.stringify({
-              chatIds: donors.map(d => d.telegramChatId),
-              collectorName: user.name,
-              lat, lng
-            })
+          const group = DB.getGroup(user.groupId);
+          await API.post('/api/notify-location', {
+            chatIds: donors.map(d => d.telegramChatId),
+            collectorName: user.name,
+            lat, lng,
           });
         } catch(e) {}
       }
@@ -2407,6 +2672,17 @@ const App = {
             <input type="password" id="new-camp-admin-pin" class="form-input" value="0000" maxlength="4" dir="ltr" style="text-align:center;letter-spacing:8px">
           </div>
         </div>
+
+        <div style="margin:20px 0;border-top:1px dashed var(--border);padding-top:16px">
+          <div style="font-weight:700;margin-bottom:12px;color:var(--text-heading);display:flex;align-items:center;gap:8px">
+            <span class="icon icon-sm" style="color:var(--primary)">${Icons.telegram}</span> توكن بوت التليجرام
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">توكن البوت الخاص بالحملة</label>
+            <input type="text" id="new-camp-bot-token" class="form-input" placeholder="123456:ABC-DEFxxxxxxxxxxxxxxx" dir="ltr" style="font-size:.8rem">
+            <div class="form-hint" style="margin-top:4px;color:var(--text-muted);font-size:.78rem">اختياري — أنشئ بوتاً عبر @BotFather وألصق توكنه هنا. إذا تُرك فارغاً يُستخدم البوت الافتراضي.</div>
+          </div>
+        </div>
       </div>
       <div style="margin-top:24px;display:flex;gap:12px">
         <button class="btn btn-outline" style="flex:1" onclick="App.closeModal()">إلغاء</button>
@@ -2415,12 +2691,12 @@ const App = {
     `);
   },
 
-  submitSuperAdminCreateCampaign() {
+  async submitSuperAdminCreateCampaign() {
     const groupName = document.getElementById('new-camp-name').value.trim();
     const uni = document.getElementById('new-camp-uni').value.trim();
     const orphansCount = parseInt(document.getElementById('new-camp-orphans').value) || 1;
     const cost = parseInt(document.getElementById('new-camp-cost').value) || 25000;
-    
+
     const adminName = document.getElementById('new-camp-admin-name').value.trim();
     const adminPhone = document.getElementById('new-camp-admin-phone').value.trim();
     const adminPin = document.getElementById('new-camp-admin-pin').value.trim() || '0000';
@@ -2428,39 +2704,186 @@ const App = {
     if (!groupName || !uni || !adminName || !adminPhone) {
       return this.toast('الرجاء ملء جميع الحقول الأساسية', 'error');
     }
-
-    // Checking if phone exists
-    const users = DB.getUsers();
-    if (Object.values(users).find(u => u.phone === adminPhone)) {
-      return this.toast('رقم هاتف المدير مسجل مسبقاً في النظام', 'error');
+    if (adminPin.length < 4) {
+      return this.toast('رمز الدخول يجب أن يكون 4 أرقام على الأقل', 'error');
     }
 
-    // Create group logic (without changing current user)
-    const group = {
-      id: DB.generateId(),
-      name: groupName,
-      university: uni,
-      orphansSponsored: orphansCount,
-      costPerOrphan: cost,
-      monthlyGoal: orphansCount * cost,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    DB.saveGroup(group);
+    const submitBtn = document.querySelector('.modal button.btn-primary');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'جاري الإنشاء…'; }
 
-    const admin = {
-      id: DB.generateId(),
-      name: adminName,
-      phone: adminPhone,
-      role: 'admin',
-      pin: adminPin,
-      groupId: group.id,
-      joinDate: new Date().toISOString().split('T')[0],
-    };
-    DB.saveUser(admin);
+    let serverGroup = null;
+    try {
+      // 1) Create the group on the server — get the real server-assigned ID back.
+      const gRes = await API.post('/api/groups', {
+        name:             groupName,
+        university:       uni,
+        orphansSponsored: orphansCount,
+        costPerOrphan:    cost,
+      });
+      if (!gRes?.success || !gRes.group) {
+        throw new Error(gRes?.error || 'فشل إنشاء الحملة');
+      }
+      serverGroup = gRes.group;
 
-    this.closeModal();
-    this.toast('تم إنشاء الحملة بنجاح!');
-    this.renderHome(); // refresh super admin dashboard
+      // 2) Create the admin user attached to that group.
+      const uRes = await API.post('/api/users', {
+        name:    adminName,
+        phone:   adminPhone,
+        role:    'admin',
+        pin:     adminPin,
+        groupId: serverGroup.id,
+      });
+      if (!uRes?.success || !uRes.user) {
+        // Group succeeded but admin failed — roll back the group so we don't
+        // leave an orphan campaign with no admin attached.
+        try { await API.del('/api/groups/' + serverGroup.id); serverGroup = null; } catch {}
+        throw new Error(uRes?.error || 'فشل إنشاء المدير');
+      }
+
+      // 3) Hydrate local cache from the server-shape rows (NOT the form inputs),
+      //    marked _noSync so we don't echo them back through SyncQueue.
+      DB.saveGroup({
+        ...serverGroup,
+        orphansSponsored: serverGroup.orphans_sponsored,
+        costPerOrphan:    serverGroup.cost_per_orphan,
+        monthlyGoal:      serverGroup.monthly_goal,
+        _noSync: true,
+      });
+      DB.saveUser({
+        ...uRes.user,
+        groupId:     uRes.user.group_id,
+        collectorId: uRes.user.collector_id,
+        _noSync: true,
+      });
+
+      this.closeModal();
+      this.toast('تم إنشاء الحملة بنجاح!');
+      this.renderHome();
+    } catch (err) {
+      const msg = err.message || 'فشل إنشاء الحملة';
+      // Defence-in-depth: if the admin POST itself threw (network or API.req error),
+      // serverGroup may still be set. Roll it back so we never leave an orphan group.
+      if (serverGroup) {
+        try { await API.del('/api/groups/' + serverGroup.id); } catch {}
+      }
+      // msg is already translated to Arabic by apiClient → Errors.t.
+      this.toast(msg, 'error');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'إنشاء واعتماد الحملة'; }
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  // SUPER ADMIN — CAMPAIGN SETTINGS / FULL DELETE
+  // ─────────────────────────────────────────────────────────
+  showCampaignSettingsModal(groupId) {
+    const group = DB.getGroup(groupId);
+    if (!group) return this.toast('الحملة غير موجودة', 'error');
+
+    // Counts pulled from local cache for transparency before destructive op.
+    const admins     = DB.getAdminsByGroup(groupId).length;
+    const collectors = DB.getCollectorsByGroup(groupId).length;
+    const donors     = DB.getDonorsByGroup(groupId).length;
+    const orphans    = DB.getOrphansByGroup(groupId).length;
+    const anns       = DB.getAnnouncementsByGroup(groupId).length;
+
+    this._openModal(`
+      <div class="modal-header">
+        <div class="modal-title" style="flex:1;text-align:center">إعدادات الحملة</div>
+      </div>
+      <div style="padding:0 4px">
+        <div style="background:var(--primary-bg);padding:14px;border-radius:var(--r-md);margin-bottom:16px">
+          <div style="font-weight:700;font-size:1.05rem;color:var(--text-heading);margin-bottom:4px">${this.esc(group.name)}</div>
+          <div class="text-sm text-muted">${this.esc(group.university || '')}</div>
+        </div>
+
+        <div style="margin-top:24px;border:1px solid var(--danger);border-radius:var(--r-md);padding:14px;background:rgba(220,38,38,.04)">
+          <div style="font-weight:700;color:var(--danger);margin-bottom:8px">⚠️ منطقة الخطر</div>
+          <p class="text-sm text-muted" style="margin-bottom:6px">
+            حذف الحملة بالكامل سيؤدي إلى إزالة:
+          </p>
+          <ul class="text-sm" style="margin:0 18px 12px;padding:0;line-height:1.8">
+            <li>${this.fmt(admins)} مدير، ${this.fmt(collectors)} مسؤول جمع، ${this.fmt(donors)} متبرع</li>
+            <li>${this.fmt(orphans)} يتيم مكفول</li>
+            <li>${this.fmt(anns)} إعلان</li>
+            <li>جميع سجلات التبرعات لهذه الحملة</li>
+          </ul>
+          <p class="text-sm" style="color:var(--danger);font-weight:700;margin-bottom:12px">لا يمكن التراجع عن هذا الإجراء.</p>
+          <button class="btn btn-danger w-full" onclick="App.confirmFullDeleteCampaign('${groupId}')">
+            <span class="icon icon-sm">${Icons.trash}</span> حذف الحملة بالكامل
+          </button>
+        </div>
+      </div>
+      <div style="margin-top:20px">
+        <button class="btn btn-outline w-full" onclick="App.closeModal()">إغلاق</button>
+      </div>
+    `);
+  },
+
+  confirmFullDeleteCampaign(groupId) {
+    const group = DB.getGroup(groupId);
+    if (!group) return;
+
+    this._openModal(`
+      <div class="modal-header">
+        <div class="modal-title" style="flex:1;text-align:center;color:var(--danger)">تأكيد حذف الحملة</div>
+      </div>
+      <div style="padding:0 4px">
+        <div style="background:rgba(220,38,38,.08);border:1px solid var(--danger);padding:14px;border-radius:var(--r-md);margin-bottom:16px">
+          <div style="font-weight:700;color:var(--danger);margin-bottom:6px">⚠️ تحذير نهائي</div>
+          <p class="text-sm">سيتم حذف الحملة <strong>"${this.esc(group.name)}"</strong> وجميع بياناتها بشكل نهائي.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">أدخل رمز الدخول الخاص بك للتأكيد</label>
+          <input type="password" id="del-camp-pin" class="form-input" placeholder="••••" maxlength="20"
+                 autocomplete="current-password"
+                 style="text-align:center;font-size:1.25rem;letter-spacing:4px"
+                 onkeyup="if(event.key==='Enter')App.submitFullDeleteCampaign('${groupId}')">
+        </div>
+      </div>
+      <div style="margin-top:20px;display:flex;gap:12px">
+        <button class="btn btn-outline" style="flex:1" onclick="App.closeModal()">إلغاء</button>
+        <button class="btn btn-danger" style="flex:2" onclick="App.submitFullDeleteCampaign('${groupId}')">
+          حذف الحملة نهائياً
+        </button>
+      </div>
+    `);
+    setTimeout(() => document.getElementById('del-camp-pin')?.focus(), 100);
+  },
+
+  async submitFullDeleteCampaign(groupId) {
+    const pinInput = document.getElementById('del-camp-pin');
+    const pin = pinInput ? pinInput.value.trim() : '';
+    if (!pin) return this.toast('الرجاء إدخال رمز الدخول', 'error');
+
+    const btn = document.querySelector('.modal button.btn-danger');
+    if (btn) { btn.disabled = true; btn.textContent = 'جاري الحذف…'; }
+
+    try {
+      const res = await API.post('/api/groups/' + groupId + '/full-delete', { pin });
+      if (!res?.success) throw new Error(res?.error || 'فشل الحذف');
+
+      // Purge local cache so the next render doesn't show ghost rows.
+      const groups = DB.getGroups(); delete groups[groupId]; DB._set(DB.KEYS.GROUPS, groups);
+      const users  = DB.getUsers();
+      Object.keys(users).forEach(uid => {
+        const u = users[uid];
+        if ((u.groupId || u.group_id) === groupId) delete users[uid];
+      });
+      DB._set(DB.KEYS.USERS, users);
+      const anns  = DB.getAnnouncements().filter(a => (a.groupId || a.group_id) !== groupId);
+      DB._setArray(DB.KEYS.ANNOUNCEMENTS, anns);
+      const orphs = DB.getOrphans().filter(o => (o.groupId || o.group_id) !== groupId);
+      localStorage.setItem(DB.KEYS.ORPHANS, JSON.stringify(orphs));
+      const dons  = DB.getDonations(); delete dons[groupId]; DB._set(DB.KEYS.DONATIONS, dons);
+
+      this.closeModal();
+      this.toast('تم حذف الحملة بالكامل');
+      this.renderHome();
+    } catch (err) {
+      // err.message is already Arabic via apiClient → Errors.t
+      this.toast(err.message || 'فشل الحذف', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'حذف الحملة نهائياً'; }
+    }
   }
 };
 

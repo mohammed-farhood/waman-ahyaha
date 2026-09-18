@@ -1,100 +1,143 @@
 /* ============================================
    WAMAN-AHYAHA DONATION TRACKER — AUTH MODULE
+   All auth calls go to /api/auth/*
    ============================================ */
 
 const Auth = {
-  // Get current logged in user
+  _me: null,
+
   currentUser() {
-    return DB.getCurrentUser();
+    const id = localStorage.getItem(DB.KEYS.CURRENT_USER);
+    return id ? DB.getUser(id) : null;
   },
 
   isLoggedIn() {
     return !!this.currentUser();
   },
 
-  // Login with phone number and optional PIN
-  login(phone, pin = null) {
-    const users = DB.getUsers();
-    const user = Object.values(users).find(u => u.phone === phone);
-    
-    if (!user) return { error: 'not_found' };
-
-    // Require PIN for privileged roles
-    if (['superadmin', 'admin', 'collector'].includes(user.role)) {
-      if (pin === null || pin === '') return { require_pin: true, user };
-      if (String(user.pin) !== String(pin)) return { error: 'wrong_pin' };
+  // Called after login to hydrate the local cache from server
+  async bootstrap() {
+    try {
+      const data = await API.get('/api/auth/me');
+      if (data && data.user) {
+        this._me = data.user;
+        // Normalise server user into cache-compatible shape.
+        // _noSync: this data just came FROM the server — don't echo it back via SyncQueue.
+        const u = { ...data.user, groupId: data.user.group_id, collectorId: data.user.collector_id, _noSync: true };
+        DB.saveUser(u);
+        DB.setCurrentUser(u.id);
+        await DB.bootstrapData(u);
+        return { success: true, user: u };
+      }
+    } catch (err) {
+      if (err.status === 401) return { error: 'unauthenticated' };
     }
-
-    DB.setCurrentUser(user.id);
-    return { success: true, user };
+    return { error: 'unknown' };
   },
 
-  // Register a new donor
-  registerDonor(data) {
-    const user = {
-      id: DB.generateId(),
-      name: data.name,
-      phone: data.phone,
-      role: 'donor',
-      groupId: data.groupId,
-      collectorId: data.collectorId,
-      amount: data.amount || 0,
-      isAnonymous: !!data.isAnonymous,
-      joinDate: new Date().toISOString().split('T')[0],
-    };
-    DB.saveUser(user);
-    DB.setCurrentUser(user.id);
-    return user;
+  async login(phone, pin = null) {
+    try {
+      const res = await API.post('/api/auth/login', { phone, pin });
+      if (res.require_pin) return { require_pin: true };
+      if (res.success) {
+        // _noSync: this user came straight from /login response — no need to PUT it back.
+        const u = { ...res.user, groupId: res.user.group_id, collectorId: res.user.collector_id, _noSync: true };
+        DB.saveUser(u);
+        DB.setCurrentUser(u.id);
+        await DB.bootstrapData(u);
+        return { success: true, user: u };
+      }
+      return { error: res.error || 'login failed' };
+    } catch (err) {
+      return { error: err.message || 'login failed' };
+    }
   },
 
-  // Register a new collector (requires admin)
-  registerCollector(data) {
-    const user = {
-      id: DB.generateId(),
-      name: data.name,
-      phone: data.phone,
-      role: 'collector',
-      pin: data.pin || '0000',
-      groupId: data.groupId,
-      joinDate: new Date().toISOString().split('T')[0],
-      stage: data.stage || '',
-      availability: data.availability || null,
-    };
-    DB.saveUser(user);
-    return user;
+  async registerDonor(data) {
+    try {
+      // Only include collectorId if one was picked. Sending `null` for an "optional"
+      // Zod field is rejected because `.optional()` accepts undefined, not null.
+      const body = {
+        name:        data.name,
+        phone:       data.phone,
+        groupId:     data.groupId,
+        amount:      data.amount || 0,
+        isAnonymous: !!data.isAnonymous,
+      };
+      if (data.collectorId) body.collectorId = data.collectorId;
+      const res = await API.post('/api/auth/register-donor', body);
+      if (res.success) {
+        // _noSync: we just got this row from the server — don't echo it back.
+        const u = { ...res.user, groupId: res.user.group_id, _noSync: true };
+        DB.saveUser(u);
+        DB.setCurrentUser(u.id);
+        return u;
+      }
+      throw new Error(res.error || 'registration failed');
+    } catch (err) {
+      throw err;
+    }
   },
 
-  // Create a new group (and make the creator admin)
-  createGroup(groupData, adminData) {
-    const group = {
-      id: DB.generateId(),
-      name: groupData.name,
-      university: groupData.university,
-      icon: groupData.icon || 'building',
-      orphansSponsored: groupData.orphansSponsored || 1,
-      costPerOrphan: groupData.costPerOrphan || 25000,
-      monthlyGoal: (groupData.orphansSponsored || 1) * (groupData.costPerOrphan || 25000),
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    DB.saveGroup(group);
-
-    const admin = {
-      id: DB.generateId(),
-      name: adminData.name,
-      phone: adminData.phone,
-      role: 'admin',
-      pin: adminData.pin || '0000',
-      groupId: group.id,
-      joinDate: new Date().toISOString().split('T')[0],
-    };
-    DB.saveUser(admin);
-    DB.setCurrentUser(admin.id);
-
-    return { group, admin };
+  async registerCollector(data) {
+    try {
+      const res = await API.post('/api/auth/register-collector', {
+        name:        data.name,
+        phone:       data.phone,
+        pin:         data.pin || '0000',
+        groupId:     data.groupId,
+        stage:       data.stage,
+        availability: data.availability,
+      });
+      if (res.success) {
+        // _noSync: we just got this row from the server — don't echo it back.
+        const u = { ...res.user, groupId: res.user.group_id, _noSync: true };
+        DB.saveUser(u);
+        return u;
+      }
+      throw new Error(res.error || 'registration failed');
+    } catch (err) {
+      throw err;
+    }
   },
 
-  logout() {
+  async createGroup(groupData, adminData) {
+    try {
+      const gRes = await API.post('/api/groups', {
+        name:             groupData.name,
+        university:       groupData.university,
+        icon:             groupData.icon,
+        orphansSponsored: groupData.orphansSponsored || 1,
+        costPerOrphan:    groupData.costPerOrphan || 25000,
+        defaultPledge:    groupData.defaultPledge || 5000,
+      });
+      if (!gRes.success) throw new Error(gRes.error || 'group creation failed');
+      const group = gRes.group;
+
+      const aRes = await API.post('/api/auth/register-collector', {
+        name:    adminData.name,
+        phone:   adminData.phone,
+        pin:     adminData.pin || '0000',
+        groupId: group.id,
+        role:    'admin',
+      });
+      if (!aRes.success) throw new Error(aRes.error || 'admin creation failed');
+      const admin = { ...aRes.user, groupId: group.id };
+
+      // _noSync on both: server already created the rows; we're just hydrating cache.
+      DB.saveGroup({ ...group, orphansSponsored: group.orphans_sponsored, costPerOrphan: group.cost_per_orphan, monthlyGoal: group.monthly_goal, _noSync: true });
+      DB.saveUser({ ...admin, _noSync: true });
+      DB.setCurrentUser(admin.id);
+      return { group, admin };
+    } catch (err) {
+      throw err;
+    }
+  },
+
+  async logout() {
+    try { await API.post('/api/auth/logout'); } catch {}
     DB.logout();
+    this._me = null;
   },
 
   isSuperAdmin() {

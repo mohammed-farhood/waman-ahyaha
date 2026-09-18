@@ -1,18 +1,27 @@
 {
-  "name": "backend",
-  "version": "1.0.0",
-  "description": "",
+  "name": "al-ayn-backend",
+  "version": "2.0.0",
+  "description": "AL-AYN Donation Tracker — Production Backend",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "wipe:dry": "node scripts/wipe-data.js --dry-run",
+    "wipe": "node scripts/wipe-data.js --yes",
+    "wipe:factory": "node scripts/wipe-data.js --yes --all-users"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
-    "node-telegram-bot-api": "^0.67.0"
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "libphonenumber-js": "^1.11.0",
+    "node-telegram-bot-api": "^0.67.0",
+    "pg": "^8.13.3",
+    "zod": "^3.23.8"
   }
 }

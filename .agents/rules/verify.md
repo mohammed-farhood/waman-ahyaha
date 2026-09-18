@@ -37,6 +37,7 @@ Whenever the user corrects you, or you discover a "best practice" for this speci
 * **Lesson 004:** Cards with absolute-positioned children MUST have `position: relative` on the parent container.
 * **Lesson 005:** Always bump script `?v=` parameters in `index.html` when making CSS/JS changes to prevent browser caching.
 * **Lesson 006:** Never commit `.env` with secrets. Always add `.gitignore` before first push.
+* **Lesson 007:** The agent environment is sandboxed and cannot initialize local PostgreSQL databases (due to `shmget` shared memory restrictions). End-to-end backend testing requiring DB connections must be run by the user.
 
 ## 4. Teaching Intent
 Do not just provide code. Provide the "Why." 

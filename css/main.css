@@ -720,6 +720,13 @@ body[dir="ltr"] .donation-grid th:first-child { right: auto; left: 0; }
   white-space: nowrap;
   border-left: 1px solid var(--border);
 }
+
+@media (max-width: 480px) {
+  .donation-grid { font-size: .72rem; min-width: 0; }
+  .donation-grid th { padding: 7px 6px; font-size: .67rem; letter-spacing: 0; }
+  .donation-grid td { padding: 7px 6px; }
+  .donation-grid td:first-child { max-width: 95px; white-space: normal; }
+}
 body[dir="ltr"] .donation-grid td:first-child { right: auto; left: 0; border-left: none; border-right: 1px solid var(--border); }
 
 .donation-grid tbody tr:hover td { background: var(--gray-50); }
