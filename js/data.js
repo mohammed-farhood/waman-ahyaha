@@ -50,14 +50,7 @@ const DB = {
     const key = this.KEYS[collection];
     if (!key) return;
 
-    // Normalise snake_case → camelCase the rest of the app reads.
-    const normalized = { ...serverRow };
-    if (serverRow.group_id          !== undefined) normalized.groupId          = serverRow.group_id;
-    if (serverRow.collector_id      !== undefined) normalized.collectorId      = serverRow.collector_id;
-    if (serverRow.orphans_sponsored !== undefined) normalized.orphansSponsored = serverRow.orphans_sponsored;
-    if (serverRow.cost_per_orphan   !== undefined) normalized.costPerOrphan    = serverRow.cost_per_orphan;
-    if (serverRow.monthly_goal      !== undefined) normalized.monthlyGoal      = serverRow.monthly_goal;
-    if (serverRow.is_anonymous      !== undefined) normalized.isAnonymous      = serverRow.is_anonymous;
+    const normalized = this._normalize(collection, serverRow);
 
     const raw = localStorage.getItem(key);
     let parsed = null;
@@ -82,6 +75,106 @@ const DB = {
     }
   },
 
+  // ── Server rows → the camelCase shape the UI reads ────
+  // The API returns snake_case columns; every server row goes through one of these
+  // before it is cached. Snake_case keys are kept too (harmless, and some code reads them).
+  normUser(u) {
+    if (!u) return u;
+    return {
+      ...u,
+      groupId:        u.group_id         !== undefined ? u.group_id         : (u.groupId ?? null),
+      collectorId:    u.collector_id     !== undefined ? u.collector_id     : (u.collectorId ?? null),
+      isAnonymous:    u.is_anonymous     !== undefined ? !!u.is_anonymous   : !!u.isAnonymous,
+      telegramChatId: u.telegram_chat_id !== undefined ? u.telegram_chat_id : (u.telegramChatId ?? null),
+      joinDate:       u.join_date        !== undefined ? u.join_date        : u.joinDate,
+    };
+  },
+  normGroup(g) {
+    if (!g) return g;
+    return {
+      ...g,
+      orphansSponsored: g.orphans_sponsored ?? g.orphansSponsored ?? 0,
+      costPerOrphan:    g.cost_per_orphan   ?? g.costPerOrphan    ?? 25000,
+      monthlyGoal:      g.monthly_goal      ?? g.monthlyGoal      ?? 0,
+      defaultPledge:    g.default_pledge    ?? g.defaultPledge    ?? 5000,
+      createdAt:        g.created_at        ?? g.createdAt,
+    };
+  },
+  normAnnouncement(a) {
+    if (!a) return a;
+    return {
+      ...a,
+      groupId:    a.group_id    ?? a.groupId,
+      authorId:   a.author_id   ?? a.authorId,
+      authorName: a.author_name ?? a.authorName,
+      isPinned:   a.is_pinned   ?? a.isPinned ?? false,
+      date:       a.posted_at   ?? a.date,
+    };
+  },
+  normOrphan(o) {
+    if (!o) return o;
+    return { ...o, groupId: o.group_id ?? o.groupId, birthDate: o.birth_date ?? o.birthDate ?? '' };
+  },
+  normPayReport(r) {
+    if (!r) return r;
+    return {
+      ...r,
+      groupId:               r.group_id    ?? r.groupId,
+      donorId:               r.donor_id    ?? r.donorId,
+      reportedByCollectorId: r.reporter_id ?? r.reportedByCollectorId,
+      monthKey:              r.month_key   ?? r.monthKey,
+      acknowledged:          !!r.acknowledged,
+      createdAt:             r.created_at  ?? r.createdAt,
+    };
+  },
+  normSupportMessage(m) {
+    if (!m) return m;
+    return {
+      ...m,
+      senderName:  m.from_user    ?? m.senderName,
+      senderPhone: m.phone        ?? m.senderPhone,
+      senderId:    m.from_user_id ?? m.senderId,
+      text:        m.body         ?? m.text,
+      createdAt:   m.created_at   ?? m.createdAt,
+    };
+  },
+  normCampaignRequest(r) {
+    if (!r) return r;
+    return { ...(r.payload || {}), ...r, createdAt: r.created_at ?? r.createdAt };
+  },
+  _normalize(collection, row) {
+    switch (collection) {
+      case 'PAY_REPORTS':       return this.normPayReport(row);
+      case 'SUPPORT_MESSAGES':  return this.normSupportMessage(row);
+      case 'CAMPAIGN_REQUESTS': return this.normCampaignRequest(row);
+      case 'USERS':         return this.normUser(row);
+      case 'GROUPS':        return this.normGroup(row);
+      case 'ANNOUNCEMENTS': return this.normAnnouncement(row);
+      case 'ORPHANS':       return this.normOrphan(row);
+      default:              return { ...row };
+    }
+  },
+
+  // Fetch donations for the last `DONATION_MONTHS` months in one request and replace
+  // the cache for the groups covered. Superadmin (no groupId) gets every group.
+  DONATION_MONTHS: 6,
+  async loadDonations(groupId = null) {
+    const months = this.getRecentMonths(this.DONATION_MONTHS);
+    const from = months[months.length - 1];
+    const r = await API.get('/api/donations?from=' + from + (groupId ? '&groupId=' + encodeURIComponent(groupId) : ''));
+    if (!r?.donations) return;
+    const all = this.getDonations();
+    const fresh = {};
+    if (groupId) fresh[groupId] = {};
+    r.donations.forEach(d => {
+      const g = (fresh[d.group_id] ||= {});
+      const m = (g[d.month_key] ||= {});
+      m[d.user_id] = { paid: d.paid, amount: d.amount, date: d.paid_date, collectorId: d.collector_id };
+    });
+    if (!groupId) Object.keys(all).forEach(k => delete all[k]);
+    this._set(this.KEYS.DONATIONS, { ...all, ...fresh });
+  },
+
   // ── Bootstrap: pull fresh state from server after login ─
   async bootstrapData(user) {
     try {
@@ -96,43 +189,47 @@ const DB = {
 
       if (groupsRes?.groups) {
         const groups = {};
-        groupsRes.groups.forEach(g => { groups[g.id] = { ...g, orphansSponsored: g.orphans_sponsored, costPerOrphan: g.cost_per_orphan, monthlyGoal: g.monthly_goal }; });
+        groupsRes.groups.forEach(g => { groups[g.id] = this.normGroup(g); });
         this._set(this.KEYS.GROUPS, groups);
       }
       if (usersRes?.users) {
-        const users = this._get(this.KEYS.USERS);
-        usersRes.users.forEach(u => { users[u.id] = { ...u, groupId: u.group_id, collectorId: u.collector_id }; });
+        // Replace, don't merge: rows deleted on the server must disappear locally.
+        const users = {};
+        const me = this.getUser(user.id);
+        if (me) users[me.id] = me;
+        usersRes.users.forEach(u => { users[u.id] = this.normUser(u); });
         this._set(this.KEYS.USERS, users);
       }
       if (annRes?.announcements) {
-        this._setArray(this.KEYS.ANNOUNCEMENTS, annRes.announcements.map(a => ({ ...a, groupId: a.group_id })));
+        this._setArray(this.KEYS.ANNOUNCEMENTS, annRes.announcements.map(a => this.normAnnouncement(a)));
       }
 
-      // Donations: fetch current + recent 3 months
-      const months = this.getRecentMonths(3);
-      if (gid) {
-        const donCache = {};
-        await Promise.all(months.map(async month => {
-          try {
-            const r = await API.get(`/api/donations?groupId=${gid}&month=${month}`);
-            if (r?.donations) {
-              if (!donCache[gid]) donCache[gid] = {};
-              if (!donCache[gid][month]) donCache[gid][month] = {};
-              r.donations.forEach(d => {
-                donCache[gid][month][d.user_id] = { paid: d.paid, amount: d.amount, date: d.paid_date, collectorId: d.collector_id };
-              });
-            }
-          } catch {}
-        }));
-        const existing = this._get(this.KEYS.DONATIONS);
-        this._set(this.KEYS.DONATIONS, { ...existing, ...donCache });
+      // Donations for the months the grid shows (every group for superadmin)
+      if (gid || isSuperAdmin) {
+        try { await this.loadDonations(isSuperAdmin ? null : gid); }
+        catch (e) { console.warn('[DB] donations load failed:', e.message); }
       }
+
+      // Lists that used to live only in this browser's localStorage
+      const isStaff = ['collector', 'admin', 'superadmin'].includes(user.role);
+      const isAdmin = user.role === 'admin' || isSuperAdmin;
+      await Promise.all([
+        isStaff && API.get('/api/pay-reports').then(r => {
+          if (r?.reports) this._setArray(this.KEYS.PAY_REPORTS, r.reports.map(x => this.normPayReport(x)));
+        }).catch(() => {}),
+        isAdmin && API.get('/api/support-messages').then(r => {
+          if (r?.messages) this._setArray(this.KEYS.SUPPORT_MESSAGES, r.messages.map(x => this.normSupportMessage(x)));
+        }).catch(() => {}),
+        isSuperAdmin && API.get('/api/campaign-requests').then(r => {
+          if (r?.requests) this._setArray(this.KEYS.CAMPAIGN_REQUESTS, r.requests.map(x => this.normCampaignRequest(x)));
+        }).catch(() => {}),
+      ]);
 
       // Orphans
       if (gid || isSuperAdmin) {
         try {
           const r = await API.get('/api/orphans' + (gid && !isSuperAdmin ? `?groupId=${gid}` : ''));
-          if (r?.orphans) this._setArray(this.KEYS.ORPHANS, r.orphans.map(o => ({ ...o, groupId: o.group_id })));
+          if (r?.orphans) this._setArray(this.KEYS.ORPHANS, r.orphans.map(o => this.normOrphan(o)));
         } catch {}
       }
     } catch (e) {
@@ -210,6 +307,18 @@ const DB = {
   },
 
   getAllGroupsList() { return Object.values(this.getGroups()); },
+
+  // Public campaign list (works logged out): used by the landing page and sign-up.
+  async refreshGroups() {
+    try {
+      const r = await API.get('/api/groups');
+      if (!r?.groups) return false;
+      const groups = {};
+      r.groups.forEach(g => { groups[g.id] = this.normGroup(g); });
+      this._set(this.KEYS.GROUPS, groups);
+      return true;
+    } catch { return false; }  // offline — keep whatever is cached
+  },
 
   // ==============================
   // DONATIONS
@@ -302,7 +411,15 @@ const DB = {
     // Server assigns its own id; reconcile swaps the temp id for the real one in cache
     // so in-session delete/edit by id works.
     SyncQueue.enqueue({
-      method: 'POST', path: '/api/announcements', body: announcement,
+      method: 'POST', path: '/api/announcements',
+      body: {
+        groupId:  announcement.groupId,
+        type:     announcement.type || 'general',
+        title:    announcement.title || '',
+        content:  announcement.content || '',
+        isPinned: !!announcement.isPinned,
+        image:    announcement.image || null,
+      },
       reconcile: { collection: 'ANNOUNCEMENTS', tempId: announcement.id, responseField: 'announcement' },
     });
     return announcement;
@@ -348,9 +465,12 @@ const DB = {
 
   logout() {
     localStorage.removeItem(this.KEYS.CURRENT_USER);
-    // Optionally clear sensitive caches
-    [this.KEYS.USERS, this.KEYS.DONATIONS, this.KEYS.ORPHANS,
-     this.KEYS.SUPPORT_MESSAGES, this.KEYS.PAY_REPORTS].forEach(k => localStorage.removeItem(k));
+    // Clear everything tied to the account so the next person on this device sees nothing.
+    // (Groups stay: the public landing page shows them.)
+    [this.KEYS.USERS, this.KEYS.DONATIONS, this.KEYS.ORPHANS, this.KEYS.ANNOUNCEMENTS,
+     this.KEYS.SUPPORT_MESSAGES, this.KEYS.PAY_REPORTS, this.KEYS.CAMPAIGN_REQUESTS,
+    ].forEach(k => localStorage.removeItem(k));
+    Object.keys(localStorage).filter(k => k.startsWith('audit_')).forEach(k => localStorage.removeItem(k));
   },
 
   // ==============================
@@ -398,17 +518,18 @@ const DB = {
     return this.getOrphans().filter(o => o.groupId === groupId || o.group_id === groupId);
   },
   saveOrphan(orphan) {
-    if (!orphan.id) orphan.id = 'orph_' + Date.now() + Math.floor(Math.random() * 1000);
+    if (!orphan.id) orphan.id = 'tmp_orph_' + this.generateId();
     const tbl = this.getOrphans();
     const idx = tbl.findIndex(o => o.id === orphan.id);
-    if (idx >= 0) tbl[idx] = orphan; else tbl.push(orphan);
+    if (idx >= 0) tbl[idx] = { ...tbl[idx], ...orphan }; else tbl.push(orphan);
     localStorage.setItem(this.KEYS.ORPHANS, JSON.stringify(tbl));
-    SyncQueue.enqueue({
-      method: idx >= 0 ? 'PUT' : 'POST',
-      path:   idx >= 0 ? `/api/orphans/${orphan.id}` : '/api/orphans',
-      body:   orphan,
-    });
-    return orphan.id;
+    const { id, ...body } = orphan;
+    if (!body.birthDate) delete body.birthDate;
+    SyncQueue.enqueue(idx >= 0
+      ? { method: 'PUT',  path: `/api/orphans/${id}`, body }
+      : { method: 'POST', path: '/api/orphans', body,
+          reconcile: { collection: 'ORPHANS', tempId: id, responseField: 'orphan' } });
+    return id;
   },
   deleteOrphan(id) {
     localStorage.setItem(this.KEYS.ORPHANS, JSON.stringify(this.getOrphans().filter(o => o.id !== id)));
@@ -490,7 +611,12 @@ const DB = {
     msg.createdAt = new Date().toISOString();
     msgs.push(msg);
     this._setArray(this.KEYS.SUPPORT_MESSAGES, msgs);
-    SyncQueue.enqueue({ method: 'POST', path: '/api/support-messages', body: { subject: msg.subject, body: msg.body || msg.message } });
+    const body = { body: msg.text || msg.body || msg.message || '', senderName: msg.senderName || undefined };
+    if (msg.subject) body.subject = msg.subject;
+    SyncQueue.enqueue({
+      method: 'POST', path: '/api/support-messages', body,
+      reconcile: { collection: 'SUPPORT_MESSAGES', tempId: msg.id, responseField: 'message' },
+    });
     return msg;
   },
   getSupportMessages() { return this._getArray(this.KEYS.SUPPORT_MESSAGES); },
@@ -513,7 +639,17 @@ const DB = {
     report.acknowledged = false;
     all.push(report);
     this._setArray(this.KEYS.PAY_REPORTS, all);
-    SyncQueue.enqueue({ method: 'POST', path: '/api/pay-reports', body: report });
+    SyncQueue.enqueue({
+      method: 'POST', path: '/api/pay-reports',
+      body: {
+        groupId:  report.groupId,
+        donorId:  report.donorId,
+        monthKey: report.monthKey || this.getCurrentMonthKey(),
+        amount:   report.amount || 0,
+        note:     report.note || undefined,
+      },
+      reconcile: { collection: 'PAY_REPORTS', tempId: report.id, responseField: 'report' },
+    });
     return report;
   },
   acknowledgePayReport(reportId) {

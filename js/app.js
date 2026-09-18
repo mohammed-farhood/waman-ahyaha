@@ -8,6 +8,15 @@ const API_BASE_URL = window.AL_AYN_API || '';
 const App = {
   currentView: 'landing',
 
+  // Phone as international digits for wa.me / t.me links. The server stores
+  // E.164 (+9647XXXXXXXXX); older cached rows may still be local (07XXXXXXXXX).
+  intlPhone(phone) {
+    const d = String(phone || '').replace(/[^\d]/g, '');
+    if (d.startsWith('964')) return d;
+    if (d.startsWith('0'))   return '964' + d.slice(1);
+    return d;
+  },
+
   // XSS Prevention: Sanitize user-provided strings before inserting into DOM
   esc(str) {
     if (!str) return '';
@@ -33,7 +42,16 @@ const App = {
       }
     } else {
       this.navigate('landing');
+      // Visitors have no cache yet: load the public campaign list, then redraw.
+      DB.refreshGroups().then(ok => { if (ok && this.currentView === 'landing') this.renderLanding(); });
     }
+    SyncQueue._flush();
+
+    // A queued change the server refused (bad data / not allowed) — tell the user.
+    window.addEventListener('alayn:syncFailed', (e) => {
+      const msg = e.detail?.error || '';
+      this.toast('لم يتم حفظ أحد التغييرات على الخادم' + (msg ? ': ' + msg : ''), 'error');
+    });
 
     // Listen for server-side logout (401 on any request)
     window.addEventListener('alayn:loggedOut', () => {
@@ -223,7 +241,8 @@ const App = {
     const view   = this._show('view-landing');
     const groups = DB.getAllGroupsList();
     const totalOrphans = groups.reduce((s,g) => s + (g.orphansSponsored||0), 0);
-    const totalDonors  = Object.values(DB.getUsers()).filter(u => u.role === 'donor').length;
+    const cachedDonors = Object.values(DB.getUsers()).filter(u => u.role === 'donor').length;
+    const totalDonors  = cachedDonors || groups.reduce((s,g) => s + (g.donor_count||0), 0);
 
     view.innerHTML = `
       <div class="hero">
@@ -346,16 +365,7 @@ const App = {
     const view = this._show('view-register');
     // Pull a fresh list from the server (donor may not be logged in yet, so local
     // cache is empty). The endpoint is public; if it fails, fall back to cache.
-    try {
-      const r = await API.get('/api/groups');
-      if (r?.groups) {
-        const groupsMap = {};
-        r.groups.forEach(g => {
-          groupsMap[g.id] = { ...g, orphansSponsored: g.orphans_sponsored, costPerOrphan: g.cost_per_orphan, monthlyGoal: g.monthly_goal };
-        });
-        DB._set(DB.KEYS.GROUPS, groupsMap);
-      }
-    } catch (_) { /* offline — use whatever's cached */ }
+    await DB.refreshGroups();
     const groups = DB.getAllGroupsList();
     view.innerHTML = `
       <div class="auth-page">
@@ -419,7 +429,8 @@ const App = {
     const colGroup = document.getElementById('reg-collector-group');
     const colSelect = document.getElementById('reg-collector');
     if (!groupId) { colGroup.style.display = 'none'; return; }
-    const collectors = DB.getCollectorsByGroup(groupId);
+    let collectors = DB.getCollectorsByGroup(groupId);
+    if (!collectors.length) collectors = DB.getGroup(groupId)?.collectors || [];
     colGroup.style.display = collectors.length > 0 ? '' : 'none';
     colSelect.innerHTML = '<option value="">— بدون تعيين —</option>' +
       collectors.map(c => `<option value="${c.id}">${App.esc(c.name)}</option>`).join('');
@@ -435,7 +446,6 @@ const App = {
     const collectorId = colSelectEl ? colSelectEl.value || null : null;
     if (!name || !phone || !groupId) return this.toast('الرجاء ملء جميع الحقول', 'error');
     if (name.length < 2) return this.toast('الاسم يجب أن يكون حرفين على الأقل', 'error');
-    if (Object.values(DB.getUsers()).find(u => u.phone === phone)) return this.toast('رقم الهاتف مسجل مسبقاً', 'error');
     try {
       await Auth.registerDonor({ name, phone, groupId, amount, isAnonymous, collectorId });
       this.toast('تم التسجيل بنجاح');
@@ -662,7 +672,7 @@ const App = {
           <div class="flex-between" style="margin-bottom:10px">
             <div>
               <div class="font-bold" style="font-size:1rem;color:var(--text-heading)">${this.esc(g.name)}</div>
-              <div class="text-sm text-muted" style="margin-top:3px">${this.esc(g.university)} &nbsp;·&nbsp; <span style="cursor:pointer;color:var(--primary)" onclick="event.stopPropagation(); App._getEffectiveGroupId = () => '${g.id}'; App.navigate('orphans')">${DB.getOrphansByGroup(g.id).length} يتيم مكفول</span></div>
+              <div class="text-sm text-muted" style="margin-top:3px">${this.esc(g.university)} &nbsp;·&nbsp; <span style="cursor:pointer;color:var(--primary)" onclick="event.stopPropagation(); App._superAdminActiveGroup = '${g.id}'; App.navigate('orphans')">${DB.getOrphansByGroup(g.id).length} يتيم مكفول</span></div>
             </div>
             <span class="badge ${stats.completionRate>=100?'badge-success':'badge-primary'}">${stats.completionRate}%</span>
           </div>
@@ -679,7 +689,7 @@ const App = {
         <div class="card fade-up" style="margin-bottom:20px;background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);border:none;color:white">
           <div class="flex-between" style="margin-bottom:12px;align-items:flex-start">
             <div>
-              <div style="font-size:.875rem;opacity:.85;margin-bottom:4px;display:flex;align-items:center;gap:4px">مرحباً فرهود <span class="icon icon-sm">${Icons.handwave}</span></div>
+              <div style="font-size:.875rem;opacity:.85;margin-bottom:4px;display:flex;align-items:center;gap:4px">مرحباً ${this.esc((Auth.currentUser()?.name || '').split(' ')[0])} <span class="icon icon-sm">${Icons.handwave}</span></div>
               <h2 style="color:white;font-size:1.5rem;margin:0">لوحة المدير العام</h2>
             </div>
             <span style="background:rgba(255,255,255,.2);padding:4px 10px;border-radius:999px;font-size:.75rem;font-weight:700">المدير العام</span>
@@ -720,6 +730,18 @@ const App = {
   // ─────────────────────────────────────────────────────────
   // DONATION GRID
   // ─────────────────────────────────────────────────────────
+  _renderNoGroup(view) {
+    view.innerHTML = `
+      <div class="container pb-nav">
+        <div class="empty-state">
+          <div class="empty-icon">${Icons.news}</div>
+          <div class="empty-title">لا توجد حملة بعد</div>
+          <div class="empty-desc">أنشئ حملة من لوحة المدير العام أولاً</div>
+          <button class="btn btn-primary" style="margin-top:12px" onclick="App.navigate('home')">الرئيسية</button>
+        </div>
+      </div>`;
+  },
+
   renderGrid() {
     const view = this._show('view-grid');
     const user  = Auth.currentUser();
@@ -727,7 +749,7 @@ const App = {
     
     const effectiveGroupId = this._getEffectiveGroupId();
     const group   = DB.getGroup(effectiveGroupId);
-    if (!group) return this.navigate('landing');
+    if (!group) return this._renderNoGroup(view);
 
     const months  = DB.getRecentMonths(6);
     const canEdit = Auth.canManageDonations();
@@ -988,37 +1010,22 @@ const App = {
     const isAnonymous = document.getElementById('add-is-anonymous').checked;
     const effectiveGroupId = this._getEffectiveGroupId();
 
-    // ── Smart lookup: is this phone already registered? ──
-    const existingUser = Object.values(DB.getUsers()).find(u => u.phone === phone);
-
-    if (existingUser) {
-      // Link the existing user to this collector
-      existingUser.collectorId = collectorId;
-      existingUser.groupId     = effectiveGroupId;
-      DB.saveUser(existingUser);
-
-      // Notify via Telegram if linked
-      if (existingUser.telegramChatId) {
-        const collector = DB.getUser(collectorId);
-        const group = DB.getGroup(effectiveGroupId);
-        const msg = `مرحباً ${existingUser.name}،\n\nتم إضافتك إلى قائمة المتبرعين التابعة لمسؤول الجمع: ${collector?.name || 'غير محدد'}.\nإدارة تطبيق ومن أحياها`;
-        API.post('/api/send-reminders', { messages: [{ chatId: existingUser.telegramChatId, text: msg }] }).catch(() => {});
+    try {
+      const { user: donor, linked } = await Auth.addDonor({
+        name, phone, amount, isAnonymous, collectorId,
+        groupId: user.role === 'superadmin' ? effectiveGroupId : undefined,
+      });
+      // Notify via Telegram if the linked donor has it connected
+      if (linked && donor.telegramChatId) {
+        const collector = DB.getUser(donor.collectorId);
+        const msg = `مرحباً ${donor.name}،\n\nتم إضافتك إلى قائمة المتبرعين التابعة لمسؤول الجمع: ${collector?.name || 'غير محدد'}.\nإدارة تطبيق ومن أحياها`;
+        API.post('/api/send-reminders', { messages: [{ chatId: donor.telegramChatId, text: msg }] }).catch(() => {});
       }
-
-      DB.setCurrentUser(user.id);
       this.closeModal();
-      this.toast(`تم ربط ${existingUser.name} بهذا المسؤول ✓`);
-    } else {
-      // New user — register fresh
-      try {
-        await Auth.registerDonor({ name, phone, groupId: effectiveGroupId, collectorId, amount, isAnonymous });
-        DB.setCurrentUser(user.id);
-        this.closeModal();
-        this.toast('تمت إضافة المتبرع');
-      } catch (err) {
-        this.toast(err.message || 'فشل إضافة المتبرع', 'error');
-        return;
-      }
+      this.toast(linked ? `تم ربط ${donor.name} بهذا المسؤول ✓` : 'تمت إضافة المتبرع');
+    } catch (err) {
+      this.toast(err.message || 'فشل إضافة المتبرع', 'error');
+      return;
     }
     this.renderGrid();
   },
@@ -1043,7 +1050,7 @@ const App = {
           </div>
           <div style="margin-top:12px;display:flex;gap:8px">
             <a href="tel:${collector.phone}" class="btn btn-primary btn-sm" style="flex:1;justify-content:center">اتصال</a>
-            <a href="https://wa.me/964${collector.phone?.slice(1)}" target="_blank" class="btn btn-outline btn-sm" style="flex:1;justify-content:center;color:#25D366;border-color:#25D366">واتساب</a>
+            <a href="https://wa.me/${App.intlPhone(collector.phone)}" target="_blank" class="btn btn-outline btn-sm" style="flex:1;justify-content:center;color:#25D366;border-color:#25D366">واتساب</a>
           </div>
         </div>
       `;
@@ -1164,6 +1171,7 @@ const App = {
     
     const effectiveGroupId = this._getEffectiveGroupId();
     const group = DB.getGroup(effectiveGroupId);
+    if (!group) return this._renderNoGroup(view);
     const anns  = DB.getAnnouncementsByGroup(group.id).filter(a => a.type !== 'reminder');
     const can   = Auth.canPostAnnouncements();
     const pinnedAnns = anns.filter(a => a.isPinned);
@@ -1220,7 +1228,7 @@ const App = {
         </div>
         ${a.title ? `<div class="ann-title">${this.esc(a.title)}</div>` : ''}
         <div class="ann-body">${this.esc(a.content)}</div>
-        ${a.image ? `<img src="${a.image}" style="margin-top:12px;border-radius:var(--r-sm);max-height:300px;object-fit:cover;width:100%" alt="Attachment">` : ''}
+        ${a.image ? `<img src="${this.esc(a.image.startsWith('/') ? API.BASE + a.image : a.image)}" loading="lazy" style="margin-top:12px;border-radius:var(--r-sm);max-height:300px;object-fit:cover;width:100%" alt="Attachment">` : ''}
       </div>`;
   },
 
@@ -1345,10 +1353,10 @@ const App = {
               <span class="icon icon-sm icon-white">${Icons.telegram}</span> إرسال بالبوت
             </button>` :
            (d.phone ? `
-            <a href="https://wa.me/964${d.phone.slice(1)}?text=${msg}" target="_blank" onclick="App.logManualReminder('wa_reminder')" class="wa-btn wa-btn-whatsapp" style="padding:6px 10px;font-size:.75rem">
+            <a href="https://wa.me/${App.intlPhone(d.phone)}?text=${msg}" target="_blank" onclick="App.logManualReminder('wa_reminder')" class="wa-btn wa-btn-whatsapp" style="padding:6px 10px;font-size:.75rem">
               <span class="icon icon-sm">${Icons.whatsapp}</span>
             </a>
-            <a href="https://t.me/+964${d.phone.slice(1)}?text=${msg}" target="_blank" onclick="App.logManualReminder('tg_manual_reminder')" class="wa-btn wa-btn-telegram" style="padding:6px 10px;font-size:.75rem">
+            <a href="https://t.me/+${App.intlPhone(d.phone)}?text=${msg}" target="_blank" onclick="App.logManualReminder('tg_manual_reminder')" class="wa-btn wa-btn-telegram" style="padding:6px 10px;font-size:.75rem">
               <span class="icon icon-sm">${Icons.telegram}</span>
             </a>` : '<span class="text-xs text-muted">لا يوجد رقم</span>')}
         </div>
@@ -1473,8 +1481,8 @@ const App = {
             this._tgPollTimeout = null;
             const user = Auth.currentUser();
             user.telegramChatId = pollData.chatId;
-            DB.saveUser(user);
-            DB.setCurrentUser(user.id);
+            DB.saveUser({ ...user, _noSync: true });
+            SyncQueue.enqueue({ method: 'POST', path: `/api/users/${user.id}/telegram-link`, body: { code } });
             this.toast('تم تأكيد الربط وسحب هويتك بنجاح!');
             this.renderProfile();
           }
@@ -1755,10 +1763,10 @@ const App = {
                 <div class="avail-actions">
                   ${c.phone ? `
                     <a href="tel:${c.phone}" class="btn btn-outline btn-sm"><span class="icon icon-sm">${Icons.phone}</span> اتصال</a>
-                    <a href="https://wa.me/964${c.phone.slice(1)}?text=${msgTxt}" target="_blank" class="wa-btn wa-btn-whatsapp" style="font-size:.8125rem">
+                    <a href="https://wa.me/${App.intlPhone(c.phone)}?text=${msgTxt}" target="_blank" class="wa-btn wa-btn-whatsapp" style="font-size:.8125rem">
                       <span class="icon icon-sm">${Icons.whatsapp}</span> واتساب
                     </a>
-                    <a href="https://t.me/+964${c.phone.slice(1)}?text=${msgTxt}" target="_blank" class="wa-btn wa-btn-telegram" style="font-size:.8125rem">
+                    <a href="https://t.me/+${App.intlPhone(c.phone)}?text=${msgTxt}" target="_blank" class="wa-btn wa-btn-telegram" style="font-size:.8125rem">
                       <span class="icon icon-sm">${Icons.telegram}</span> تيليجرام
                     </a>` : '<span class="text-muted text-sm">لا يوجد رقم</span>'}
                 </div>
@@ -1944,7 +1952,7 @@ const App = {
     const groupName = effectiveGroupId ? DB.getGroup(effectiveGroupId)?.name : 'كل الأيتام';
     const orphans = DB.getOrphansByGroup(effectiveGroupId);
     
-    const canManage = Auth.canManageDonations() || user.role === 'admin';
+    const canManage = user.role === 'admin' || user.role === 'superadmin';
 
     // Calculate days until birthday
     const getDaysTillBirthday = (bdate) => {
@@ -2149,7 +2157,7 @@ const App = {
       </div>
       <div class="form-group">
         <label class="form-label">الرمز السري (PIN)</label>
-        <input type="text" id="coll-pin" class="form-input" placeholder="0000" maxlength="4" dir="ltr" style="text-align:center">
+        <input type="text" id="coll-pin" class="form-input" placeholder="4 أرقام أو أكثر" maxlength="20" inputmode="numeric" dir="ltr" style="text-align:center">
       </div>
       <div class="form-group">
         <label class="form-label">المرحلة الدراسية</label>
@@ -2162,9 +2170,10 @@ const App = {
   async handleAddCollector() {
     const name  = document.getElementById('coll-name').value.trim();
     const phone = document.getElementById('coll-phone').value.trim();
-    const pin   = document.getElementById('coll-pin').value.trim() || '0000';
+    const pin   = document.getElementById('coll-pin').value.trim();
     const stage = document.getElementById('coll-stage').value.trim();
     if (!name||!phone) return this.toast('الرجاء ملء الحقول','error');
+    if (pin.length < 4) return this.toast('رمز الدخول يجب أن يكون 4 أرقام على الأقل', 'error');
     try {
       await Auth.registerCollector({ name, phone, pin, groupId: this._getEffectiveGroupId(), stage });
       this.closeModal();
@@ -2549,9 +2558,28 @@ const App = {
     document.getElementById('support-msg').value = '';
   },
 
+  _renderCampaignRequests() {
+    const reqs = DB.getCampaignRequests().slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    if (!reqs.length) return '';
+    return `
+      <div class="card" style="margin-bottom:20px;border-top:3px solid var(--gold)">
+        <h4 style="margin-bottom:14px;display:flex;align-items:center;gap:6px"><span class="icon icon-sm">${Icons.inbox}</span> طلبات تأسيس حملات جديدة (${this.fmt(reqs.length)})</h4>
+        ${reqs.map(r => `
+          <div style="background:var(--gray-50);border-radius:var(--r-sm);padding:12px;margin-bottom:10px;border:1px solid var(--border)">
+            <div class="flex-between" style="margin-bottom:6px">
+              <span style="font-weight:700;font-size:.9rem;color:var(--text-heading)">${this.esc(r.name)}</span>
+              <span class="text-xs text-muted">${this.timeAgo(r.createdAt)}</span>
+            </div>
+            ${r.message ? `<p style="font-size:.9rem;color:var(--text-body);line-height:1.8;margin-bottom:8px">${this.esc(r.message)}</p>` : ''}
+            <a href="https://wa.me/${App.intlPhone(r.phone)}" target="_blank" class="text-xs" dir="ltr">${this.esc(r.phone)}</a>
+          </div>`).join('')}
+      </div>`;
+  },
+
   _renderSupportInbox() {
     const user = Auth.currentUser();
     if (!user) return '';
+    const campaignRequests = user.role === 'superadmin' ? this._renderCampaignRequests() : '';
 
     const isAdminOrSupport = user.role === 'admin' || user.role === 'superadmin';
 
@@ -2561,11 +2589,11 @@ const App = {
     }
 
     if (msgs.length === 0) {
-      if (isAdminOrSupport) return `<div class="card" style="margin-bottom:20px;text-align:center;padding:20px"><p class="text-muted">لا توجد رسائل دعم حالياً.</p></div>`;
+      if (isAdminOrSupport) return campaignRequests + `<div class="card" style="margin-bottom:20px;text-align:center;padding:20px"><p class="text-muted">لا توجد رسائل دعم حالياً.</p></div>`;
       return '';
     }
 
-    return `
+    return campaignRequests + `
       <div class="card" style="margin-bottom:20px;border-top:3px solid var(--danger)">
         <h4 style="margin-bottom:14px;color:var(--danger);display:flex;align-items:center;gap:6px"><span class="icon icon-sm">${Icons.inbox}</span> صندوق رسائل الدعم (${this.fmt(msgs.length)})</h4>
         ${msgs.map(m => `
@@ -2699,7 +2727,7 @@ const App = {
 
     const adminName = document.getElementById('new-camp-admin-name').value.trim();
     const adminPhone = document.getElementById('new-camp-admin-phone').value.trim();
-    const adminPin = document.getElementById('new-camp-admin-pin').value.trim() || '0000';
+    const adminPin = document.getElementById('new-camp-admin-pin').value.trim();
 
     if (!groupName || !uni || !adminName || !adminPhone) {
       return this.toast('الرجاء ملء جميع الحقول الأساسية', 'error');

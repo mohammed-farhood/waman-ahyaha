@@ -45,8 +45,27 @@ const Errors = {
     // Security / infra
     'invalid CSRF token':                'فشل التحقق الأمني، يرجى تحديث الصفحة',
     'CORS: origin not allowed':          'الاتصال بالخادم مرفوض',
-    'export limited to once per day':    'التصدير متاح مرة واحدة فقط في اليوم',
+    'export limited to 5 times per day': 'التصدير متاح 5 مرات فقط في اليوم',
     'Internal server error':             'خطأ في الخادم، يرجى المحاولة لاحقاً',
+    'Too many requests, try again later.': 'محاولات كثيرة جداً، انتظر قليلاً وحاول مجدداً',
+    'request too large':                 'الملف أو البيانات أكبر من المسموح',
+    'invalid JSON':                      'بيانات غير صالحة',
+
+    // Added with the server fixes
+    'PIN too weak':                      'رمز الدخول سهل التخمين، اختر رمزاً آخر (ليس 0000 أو 1234)',
+    'unknown campaign':                  'الحملة غير موجودة',
+    'collector not in this campaign':    'مسؤول الجمع لا يتبع هذه الحملة',
+    'donor not in this campaign':        'المتبرع لا يتبع هذه الحملة',
+    'donor not in this group':           'المتبرع لا يتبع هذه الحملة',
+    'forbidden: not your donor':         'هذا المتبرع ليس ضمن قائمتك',
+    'forbidden: chat not in this campaign': 'لا يمكن الإرسال لمستخدم خارج الحملة',
+    'telegram bot not configured':       'بوت التليجرام غير مفعّل حالياً',
+    'code not linked':                   'لم يكتمل الربط مع التليجرام، حاول مجدداً',
+    'content or image required':         'الرجاء كتابة المحتوى أو إرفاق صورة',
+    'groupId required':                  'يرجى اختيار الحملة',
+    'already exists':                    'هذا العنصر موجود مسبقاً',
+    'referenced record not found':       'بيانات مرتبطة غير موجودة',
+    'invalid value':                     'قيمة غير صالحة',
   },
 
   // ── Form field labels (for Zod validation errors that prefix the field name)
@@ -119,6 +138,8 @@ const Errors = {
       if (/^Expected boolean/i.test(detail))   return `${label}: قيمة غير صالحة`;
       if (/^Invalid enum value/i.test(detail)) return `${label}: قيمة غير مسموح بها`;
       if (/invalid phone/i.test(detail))       return `${label}: رقم هاتف غير صالح`;
+      if (/PIN too weak/i.test(detail))        return this._exact['PIN too weak'];
+      if (/content or image required/i.test(detail)) return this._exact['content or image required'];
       // Fall through to raw if the detail shape is unknown
     }
 

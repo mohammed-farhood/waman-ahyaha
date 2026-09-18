@@ -23,10 +23,12 @@ const Auth = {
         this._me = data.user;
         // Normalise server user into cache-compatible shape.
         // _noSync: this data just came FROM the server — don't echo it back via SyncQueue.
-        const u = { ...data.user, groupId: data.user.group_id, collectorId: data.user.collector_id, _noSync: true };
+        const u = { ...DB.normUser(data.user), _noSync: true };
         DB.saveUser(u);
         DB.setCurrentUser(u.id);
+        SyncQueue.dropOthers(u.id);
         await DB.bootstrapData(u);
+        SyncQueue._flush();
         return { success: true, user: u };
       }
     } catch (err) {
@@ -41,10 +43,12 @@ const Auth = {
       if (res.require_pin) return { require_pin: true };
       if (res.success) {
         // _noSync: this user came straight from /login response — no need to PUT it back.
-        const u = { ...res.user, groupId: res.user.group_id, collectorId: res.user.collector_id, _noSync: true };
+        const u = { ...DB.normUser(res.user), _noSync: true };
         DB.saveUser(u);
         DB.setCurrentUser(u.id);
+        SyncQueue.dropOthers(u.id);
         await DB.bootstrapData(u);
+        SyncQueue._flush();
         return { success: true, user: u };
       }
       return { error: res.error || 'login failed' };
@@ -67,16 +71,35 @@ const Auth = {
       if (data.collectorId) body.collectorId = data.collectorId;
       const res = await API.post('/api/auth/register-donor', body);
       if (res.success) {
-        // _noSync: we just got this row from the server — don't echo it back.
-        const u = { ...res.user, groupId: res.user.group_id, _noSync: true };
+        // The server sets the session cookies on registration; hydrate like a login.
+        const u = { ...DB.normUser(res.user), _noSync: true };
         DB.saveUser(u);
         DB.setCurrentUser(u.id);
+        SyncQueue.dropOthers(u.id);
+        await DB.bootstrapData(u);
         return u;
       }
       throw new Error(res.error || 'registration failed');
     } catch (err) {
       throw err;
     }
+  },
+
+  // Collector/admin adds a donor to their campaign. If the phone already belongs
+  // to a donor of the same campaign, the server links that donor instead.
+  async addDonor(data) {
+    const body = {
+      name:        data.name,
+      phone:       data.phone,
+      amount:      data.amount || 0,
+      isAnonymous: !!data.isAnonymous,
+    };
+    if (data.groupId)     body.groupId     = data.groupId;
+    if (data.collectorId) body.collectorId = data.collectorId;
+    const res = await API.post('/api/users/donors', body);
+    const u = { ...DB.normUser(res.user), _noSync: true };
+    DB.saveUser(u);
+    return { user: u, linked: !!res.linked };
   },
 
   async registerCollector(data) {
@@ -84,14 +107,14 @@ const Auth = {
       const res = await API.post('/api/auth/register-collector', {
         name:        data.name,
         phone:       data.phone,
-        pin:         data.pin || '0000',
+        pin:         data.pin,
         groupId:     data.groupId,
         stage:       data.stage,
         availability: data.availability,
       });
       if (res.success) {
         // _noSync: we just got this row from the server — don't echo it back.
-        const u = { ...res.user, groupId: res.user.group_id, _noSync: true };
+        const u = { ...DB.normUser(res.user), _noSync: true };
         DB.saveUser(u);
         return u;
       }
@@ -101,41 +124,12 @@ const Auth = {
     }
   },
 
-  async createGroup(groupData, adminData) {
-    try {
-      const gRes = await API.post('/api/groups', {
-        name:             groupData.name,
-        university:       groupData.university,
-        icon:             groupData.icon,
-        orphansSponsored: groupData.orphansSponsored || 1,
-        costPerOrphan:    groupData.costPerOrphan || 25000,
-        defaultPledge:    groupData.defaultPledge || 5000,
-      });
-      if (!gRes.success) throw new Error(gRes.error || 'group creation failed');
-      const group = gRes.group;
-
-      const aRes = await API.post('/api/auth/register-collector', {
-        name:    adminData.name,
-        phone:   adminData.phone,
-        pin:     adminData.pin || '0000',
-        groupId: group.id,
-        role:    'admin',
-      });
-      if (!aRes.success) throw new Error(aRes.error || 'admin creation failed');
-      const admin = { ...aRes.user, groupId: group.id };
-
-      // _noSync on both: server already created the rows; we're just hydrating cache.
-      DB.saveGroup({ ...group, orphansSponsored: group.orphans_sponsored, costPerOrphan: group.cost_per_orphan, monthlyGoal: group.monthly_goal, _noSync: true });
-      DB.saveUser({ ...admin, _noSync: true });
-      DB.setCurrentUser(admin.id);
-      return { group, admin };
-    } catch (err) {
-      throw err;
-    }
-  },
-
   async logout() {
+    // Send anything still queued while the session is valid, then drop the rest:
+    // the next person on this device must never replay this user's changes.
+    try { await Promise.race([SyncQueue.flushNow(), new Promise(r => setTimeout(r, 5000))]); } catch {}
     try { await API.post('/api/auth/logout'); } catch {}
+    SyncQueue.clear();
     DB.logout();
     this._me = null;
   },
