@@ -23,7 +23,10 @@ function init() {
     console.log(`[BOT] msg from ${msg.chat.id}: "${msg.text}"`);
   });
 
-  bot.onText(/\/start (.+)/, (msg, match) => handleStart(msg, match, bot));
+  // The library ignores the handler's promise: catch here or a Telegram/DB error
+  // becomes an unhandled rejection.
+  bot.onText(/\/start (.+)/, (msg, match) =>
+    handleStart(msg, match, bot).catch(e => console.error('[BOT] /start failed:', e.message)));
   bot.on('polling_error', (err) => console.error('[BOT POLL]', err.message));
 
   // Cleanup stale auth codes every 10 minutes
@@ -39,14 +42,14 @@ async function handleStart(msg, match, responseBot) {
   const code = match[1].trim();
   const { rows } = await pool.query('SELECT * FROM auth_codes WHERE code=$1', [code]);
   if (!rows[0]) {
-    responseBot.sendMessage(chatId, 'عذراً، الرابط غير صحيح أو منتهي الصلاحية.');
+    await responseBot.sendMessage(chatId, 'عذراً، الرابط غير صحيح أو منتهي الصلاحية.');
     return;
   }
   if (rows[0].status === 'pending') {
     await pool.query('UPDATE auth_codes SET status=$1, chat_id=$2 WHERE code=$3', ['linked', chatId, code]);
-    responseBot.sendMessage(chatId, '✅ تم ربط حسابك في تطبيق ومن أحياها بنجاح!');
+    await responseBot.sendMessage(chatId, '✅ تم ربط حسابك في تطبيق ومن أحياها بنجاح!');
   } else {
-    responseBot.sendMessage(chatId, 'هذا الرابط تم استخدامه مسبقاً.');
+    await responseBot.sendMessage(chatId, 'هذا الرابط تم استخدامه مسبقاً.');
   }
 }
 
@@ -70,9 +73,13 @@ async function getOrCreateCampaignBot(groupId) {
     console.warn(`[BOT] Evicted oldest campaign bot (cap ${MAX_CAMPAIGN_BOTS} reached)`);
   }
 
-  const newBot = new TelegramBot(tok, { polling: true });
+  // Check the token BEFORE polling: a revoked token would otherwise leave a
+  // failing poller running for every request that touches this group.
+  const newBot = new TelegramBot(tok, { polling: false });
   const me = await newBot.getMe();
-  newBot.onText(/\/start (.+)/, (msg, match) => handleStart(msg, match, newBot));
+  newBot.startPolling();
+  newBot.onText(/\/start (.+)/, (msg, match) =>
+    handleStart(msg, match, newBot).catch(e => console.error('[BOT] /start failed:', e.message)));
   newBot.on('polling_error', err => console.error(`[CAMPAIGN BOT @${me.username}]`, err.message));
   const entry = { bot: newBot, username: me.username };
   campaignBots.set(tok, entry);
@@ -94,6 +101,7 @@ class ReminderQueue {
       const { chatId, text, groupId } = this.queue.shift();
       try {
         const { bot: targetBot } = await getOrCreateCampaignBot(groupId || null);
+        if (!targetBot) throw new Error('telegram bot not configured');
         await targetBot.sendMessage(chatId, text, { parse_mode: 'HTML' });
         console.log(`[QUEUE] Sent to ${chatId}`);
       } catch (err) {

@@ -6,7 +6,10 @@ const { roleRequired }     = require('../middleware/auth');
 const { write: audit }     = require('../services/audit');
 const { normalize, hmac }  = require('../services/phone');
 
-const router = express.Router();
+// Two routers: export and import used to share one, so GET /api/import ran a
+// full export (skipping the export limit) and POST /api/export ran an import.
+const router = express.Router();          // mounted at /api/export
+const importRouter = express.Router();    // mounted at /api/import
 
 // GET /api/export  (superadmin, rate-limited in app.js)
 router.get('/', ...roleRequired('superadmin'), async (req, res, next) => {
@@ -107,12 +110,28 @@ router.get('/backups', ...roleRequired('superadmin'), async (req, res, next) => 
 });
 
 // POST /api/import  (superadmin — full import in one transaction)
-router.post('/', ...roleRequired('superadmin'), async (req, res, next) => {
+// The 50 MB body is only parsed after the caller is known to be a superadmin.
+importRouter.post('/', ...roleRequired('superadmin'), express.json({ limit: '50mb' }), async (req, res, next) => {
   try {
     const data = req.body;
     const key  = process.env.PG_ENC_KEY;
     const client = await pool.connect();
-    const stats = { users: 0, groups: 0, donations: 0, announcements: 0, orphans: 0 };
+    const stats = { users: 0, groups: 0, donations: 0, announcements: 0, orphans: 0, skipped: 0 };
+
+    // One bad row (missing parent, duplicate phone, ...) is skipped and counted
+    // instead of rolling back the whole restore.
+    const tryRow = async (sql, params) => {
+      await client.query('SAVEPOINT import_row');
+      try {
+        await client.query(sql, params);
+        await client.query('RELEASE SAVEPOINT import_row');
+        return true;
+      } catch {
+        await client.query('ROLLBACK TO SAVEPOINT import_row');
+        stats.skipped++;
+        return false;
+      }
+    };
 
     try {
       await client.query('BEGIN');
@@ -141,18 +160,22 @@ router.post('/', ...roleRequired('superadmin'), async (req, res, next) => {
         let pinHash = u.pin_hash || null;
         if (!pinHash && u.pin) pinHash = await bcrypt.hash(String(u.pin), 12);
 
-        await client.query(
+        const ok = await tryRow(
           `INSERT INTO users(id,name,phone,phone_hash,role,pin_hash,group_id,collector_id,amount,is_anonymous,join_date,stage,availability,telegram_chat_id)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (id) DO NOTHING`,
+           VALUES($1,$2,$3,$4,$5,$6,$7,NULL,$8,$9,$10,$11,$12,$13) ON CONFLICT DO NOTHING`,
           [u.id, u.name, phone, phoneHash, u.role, pinHash,
-           u.groupId||u.group_id||null, u.collectorId||u.collector_id||null,
+           u.groupId||u.group_id||null,
            u.amount||0, !!u.isAnonymous||!!u.is_anonymous,
            u.joinDate||u.join_date||new Date(),
            u.stage||null,
            u.availability ? JSON.stringify(u.availability) : null,
            u.telegramChatId||u.telegram_chat_id||null]
         );
-        stats.users++;
+        if (ok) stats.users++;
+      }
+      for (const u of Object.values(data.users || {})) {
+        const col = u.collectorId || u.collector_id;
+        if (col) await tryRow('UPDATE users SET collector_id=$1 WHERE id=$2 AND collector_id IS NULL', [col, u.id]);
       }
 
       // Flat donations array or nested object format
@@ -167,34 +190,35 @@ router.post('/', ...roleRequired('superadmin'), async (req, res, next) => {
           );
 
       for (const d of donationsArr) {
-        await client.query(
+        const ok = await tryRow(
           `INSERT INTO donations(group_id,month_key,user_id,paid,amount,paid_date,collector_id)
            VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
           [d.group_id||d.groupId, d.month_key||d.monthKey, d.user_id||d.userId,
            !!d.paid, d.amount||0, d.date||d.paid_date||null, d.collectorId||d.collector_id||null]
         );
-        stats.donations++;
+        if (ok) stats.donations++;
       }
 
       for (const a of (data.announcements || [])) {
-        await client.query(
-          `INSERT INTO announcements(id,group_id,author_id,author_name,type,title,content,posted_at)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+        const ok = await tryRow(
+          `INSERT INTO announcements(id,group_id,author_id,author_name,type,title,content,posted_at,is_pinned,image)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
           [a.id, a.groupId||a.group_id, a.authorId||a.author_id||null, a.authorName||a.author_name||'',
-           a.type||'news', a.title, a.content, a.date||a.posted_at||new Date()]
+           a.type||'news', a.title||'', a.content||'', a.date||a.posted_at||new Date(),
+           !!(a.isPinned||a.is_pinned), (a.image && a.image.startsWith('data:')) ? a.image : null]
         );
-        stats.announcements++;
+        if (ok) stats.announcements++;
       }
 
       for (const o of (data.orphans || [])) {
-        await client.query(
+        const ok = await tryRow(
           `INSERT INTO orphans(id,group_id,name_enc,code,province,type,amount,birth_date_enc,status,notes_enc)
            VALUES($1,$2,pgp_sym_encrypt($3,$10),$4,$5,$6,$7,pgp_sym_encrypt($8,$10),$9,pgp_sym_encrypt($11,$10))
            ON CONFLICT (id) DO NOTHING`,
           [o.id, o.groupId||o.group_id, o.name||'', o.code||null, o.province||null,
            o.type||null, o.amount||null, o.birthDate||o.birth_date||null, o.status||null, key, o.notes||null]
         );
-        stats.orphans++;
+        if (ok) stats.orphans++;
       }
 
       await client.query('COMMIT');
@@ -210,4 +234,4 @@ router.post('/', ...roleRequired('superadmin'), async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-module.exports = router;
+module.exports = { exportRouter: router, importRouter };

@@ -34,12 +34,13 @@ router.get('/', authRequired, async (req, res, next) => {
     const params = [key];
     let where = '';
     if (gid) { params.push(gid); where = 'AND group_id=$2'; }
-    // superadmin without groupId → see all
+    // superadmin without groupId → see all. Private notes are for staff only.
+    const notes = req.user.role === 'donor' ? 'NULL' : 'pgp_sym_decrypt(notes_enc,$1)';
     const { rows } = await pool.query(
       `SELECT id, group_id, code, province, type, amount, status,
          pgp_sym_decrypt(name_enc,$1)       AS name,
          pgp_sym_decrypt(birth_date_enc,$1) AS birth_date,
-         pgp_sym_decrypt(notes_enc,$1)      AS notes
+         ${notes}                           AS notes
        FROM orphans WHERE true ${where} ORDER BY id`,
       params
     );
@@ -101,7 +102,7 @@ router.put('/:id', ...roleRequired('admin', 'superadmin'), validate(z.object({
     const { rows: cur } = await pool.query('SELECT group_id FROM orphans WHERE id=$1', [req.params.id]);
     if (!cur[0]) return res.status(404).json({ success: false, error: 'not found' });
     if (!assertGroup(req, res, cur[0].group_id)) return;
-    const sets = []; const params = [key];
+    const sets = []; const params = [];
 
     const plain = { code:'code', province:'province', type:'type', amount:'amount', status:'status' };
     const enc   = { name:'name_enc', birthDate:'birth_date_enc', notes:'notes_enc' };
@@ -109,8 +110,14 @@ router.put('/:id', ...roleRequired('admin', 'superadmin'), validate(z.object({
     for (const [k, col] of Object.entries(plain)) {
       if (b[k] !== undefined) { params.push(b[k]); sets.push(`${col}=$${params.length}`); }
     }
+    // The key is only added when an encrypted field is present: an unused $n
+    // makes Postgres fail with "could not determine data type of parameter".
+    let keyIdx = 0;
     for (const [k, col] of Object.entries(enc)) {
-      if (b[k] !== undefined) { params.push(b[k]); sets.push(`${col}=pgp_sym_encrypt($${params.length},$1)`); }
+      if (b[k] !== undefined) {
+        if (!keyIdx) { params.push(key); keyIdx = params.length; }
+        params.push(b[k]); sets.push(`${col}=pgp_sym_encrypt($${params.length},$${keyIdx})`);
+      }
     }
     if (!sets.length) return res.status(400).json({ success: false, error: 'nothing to update' });
     params.push(req.params.id);

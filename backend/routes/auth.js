@@ -6,7 +6,7 @@ const pool    = require('../db/pool');
 const { normalize, hmac } = require('../services/phone');
 const { write: audit }    = require('../services/audit');
 const { authRequired }    = require('../middleware/auth');
-const { body: validate, phoneRaw, pinRaw } = require('../middleware/validate');
+const { body: validate, phoneRaw, pinRaw, strongPin } = require('../middleware/validate');
 const { loginLimiter, registerDonorLimiter } = require('../middleware/rateLimit');
 const { z } = require('zod');
 
@@ -35,6 +35,23 @@ async function signRefresh(userId, ip, ua, client) {
     [hash, userId, ip || null, ua || null, expiresAt]
   );
   return raw;
+}
+
+const SAFE_COLS = 'id,name,phone,role,group_id,collector_id,amount,is_anonymous,join_date,stage,availability,telegram_chat_id,created_at,updated_at';
+
+// Create a session row and set the access + refresh cookies.
+async function issueSession(res, user, req) {
+  const client = await pool.connect();
+  let refreshRaw;
+  try {
+    await client.query('BEGIN');
+    refreshRaw = await signRefresh(user.id, req.ip, req.headers['user-agent'], client);
+    await client.query('COMMIT');
+  } catch (e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+
+  res.cookie('alayn_at', signAccess(user), { ...COOKIE_OPTS(), maxAge: 15 * 60 * 1000 });
+  res.cookie('alayn_rt', refreshRaw,       { ...COOKIE_OPTS(), maxAge: 30 * 24 * 3600 * 1000, path: '/api/auth' });
 }
 
 // POST /api/auth/login
@@ -80,22 +97,9 @@ router.post('/login', loginLimiter, validate(z.object({
     // Reset lockout
     await pool.query('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1', [user.id]);
 
-    const client = await pool.connect();
-    let refreshRaw;
-    try {
-      await client.query('BEGIN');
-      refreshRaw = await signRefresh(user.id, req.ip, req.headers['user-agent'], client);
-      await client.query('COMMIT');
-    } catch (e) { await client.query('ROLLBACK'); throw e; }
-    finally { client.release(); }
+    await issueSession(res, user, req);
 
-    const accessToken = signAccess(user);
-    const refreshHash = crypto.createHash('sha256').update(refreshRaw).digest('hex');
-
-    res.cookie('alayn_at', accessToken, { ...COOKIE_OPTS(), maxAge: 15 * 60 * 1000 });
-    res.cookie('alayn_rt', refreshRaw,  { ...COOKIE_OPTS(), maxAge: 30 * 24 * 3600 * 1000, path: '/api/auth' });
-
-    const { pin_hash, phone_hash, ...safeUser } = user;
+    const { pin_hash, phone_hash, failed_attempts, locked_until, deleted_at, ...safeUser } = user;
     await audit({ actorId: user.id, action: 'login', entityType: 'user', entityId: user.id, ip: req.ip, ua: req.headers['user-agent'] });
 
     res.json({ success: true, user: safeUser });
@@ -138,15 +142,17 @@ router.post('/refresh', async (req, res, next) => {
 });
 
 // POST /api/auth/logout
-router.post('/logout', authRequired, async (req, res, next) => {
+// No authRequired: once the 15-minute access cookie has expired the refresh
+// session must still be revoked and both cookies cleared.
+router.post('/logout', async (req, res, next) => {
   try {
     const raw = req.cookies?.alayn_rt;
     if (raw) {
       const hash = crypto.createHash('sha256').update(raw).digest('hex');
       await pool.query('DELETE FROM sessions WHERE refresh_token_hash=$1', [hash]);
     }
-    res.clearCookie('alayn_at');
-    res.clearCookie('alayn_rt', { path: '/api/auth' });
+    res.clearCookie('alayn_at', COOKIE_OPTS());
+    res.clearCookie('alayn_rt', { ...COOKIE_OPTS(), path: '/api/auth' });
     res.json({ success: true });
   } catch (err) { next(err); }
 });
@@ -155,7 +161,7 @@ router.post('/logout', authRequired, async (req, res, next) => {
 router.get('/me', authRequired, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id,name,phone,role,group_id,collector_id,amount,is_anonymous,join_date,stage,availability,telegram_chat_id,created_at FROM users WHERE id=$1 AND deleted_at IS NULL',
+      `SELECT ${SAFE_COLS} FROM users WHERE id=$1 AND deleted_at IS NULL`,
       [req.user.sub]
     );
     if (!rows[0]) return res.status(404).json({ success: false, error: 'user not found' });
@@ -176,18 +182,33 @@ router.post('/register-donor', registerDonorLimiter, validate(z.object({
     const phone = normalize(req.body.phone);
     const phoneHash = hmac(phone, process.env.PHONE_HMAC_KEY);
 
-    const existing = await pool.query('SELECT id FROM users WHERE phone_hash=$1', [phoneHash]);
+    const existing = await pool.query('SELECT id FROM users WHERE phone_hash=$1 AND deleted_at IS NULL', [phoneHash]);
     if (existing.rows[0]) return res.status(409).json({ success: false, error: 'phone already registered' });
+
+    const { rows: grp } = await pool.query('SELECT id FROM groups WHERE id=$1 AND deleted_at IS NULL', [req.body.groupId]);
+    if (!grp[0]) return res.status(400).json({ success: false, error: 'unknown campaign' });
+
+    // Only accept a collector that really collects for this campaign.
+    let collectorId = null;
+    if (req.body.collectorId) {
+      const { rows: col } = await pool.query(
+        "SELECT id FROM users WHERE id=$1 AND group_id=$2 AND role='collector' AND deleted_at IS NULL",
+        [req.body.collectorId, req.body.groupId]
+      );
+      collectorId = col[0]?.id || null;
+    }
 
     const id = 'usr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     await pool.query(
       `INSERT INTO users (id,name,phone,phone_hash,role,group_id,collector_id,amount,is_anonymous)
        VALUES ($1,$2,$3,$4,'donor',$5,$6,$7,$8)`,
-      [id, req.body.name, phone, phoneHash, req.body.groupId, req.body.collectorId || null,
+      [id, req.body.name, phone, phoneHash, req.body.groupId, collectorId,
        req.body.amount || 0, !!req.body.isAnonymous]
     );
-    const { rows } = await pool.query('SELECT id,name,phone,role,group_id,join_date FROM users WHERE id=$1', [id]);
+    const { rows } = await pool.query(`SELECT ${SAFE_COLS} FROM users WHERE id=$1`, [id]);
     await audit({ action: 'register_donor', entityType: 'user', entityId: id, after: rows[0], ip: req.ip });
+    // Donors log in with their phone alone, so registering signs them in.
+    await issueSession(res, rows[0], req);
     res.status(201).json({ success: true, user: rows[0] });
   } catch (err) { next(err); }
 });
@@ -196,7 +217,7 @@ router.post('/register-donor', registerDonorLimiter, validate(z.object({
 router.post('/register-collector', authRequired, validate(z.object({
   name:        z.string().min(2).max(100),
   phone:       phoneRaw,
-  pin:         pinRaw,
+  pin:         strongPin,
   groupId:     z.string().min(1),
   stage:       z.string().optional(),
   availability: z.any().optional(),
@@ -205,9 +226,11 @@ router.post('/register-collector', authRequired, validate(z.object({
     if (!['admin', 'superadmin'].includes(req.user.role)) {
       return res.status(403).json({ success: false, error: 'forbidden' });
     }
+    // An admin can only add collectors to their own campaign.
+    const groupId = req.user.role === 'superadmin' ? req.body.groupId : req.user.groupId;
     const phone = normalize(req.body.phone);
     const phoneHash = hmac(phone, process.env.PHONE_HMAC_KEY);
-    const existing = await pool.query('SELECT id FROM users WHERE phone_hash=$1', [phoneHash]);
+    const existing = await pool.query('SELECT id FROM users WHERE phone_hash=$1 AND deleted_at IS NULL', [phoneHash]);
     if (existing.rows[0]) return res.status(409).json({ success: false, error: 'phone already registered' });
 
     const pinHash = await bcrypt.hash(String(req.body.pin), 12);
@@ -215,10 +238,10 @@ router.post('/register-collector', authRequired, validate(z.object({
     await pool.query(
       `INSERT INTO users (id,name,phone,phone_hash,role,pin_hash,group_id,stage,availability)
        VALUES ($1,$2,$3,$4,'collector',$5,$6,$7,$8)`,
-      [id, req.body.name, phone, phoneHash, pinHash, req.body.groupId,
+      [id, req.body.name, phone, phoneHash, pinHash, groupId,
        req.body.stage || null, req.body.availability ? JSON.stringify(req.body.availability) : null]
     );
-    const { rows } = await pool.query('SELECT id,name,phone,role,group_id,stage FROM users WHERE id=$1', [id]);
+    const { rows } = await pool.query(`SELECT ${SAFE_COLS} FROM users WHERE id=$1`, [id]);
     await audit({ actorId: req.user.sub, action: 'register_collector', entityType: 'user', entityId: id, after: rows[0], ip: req.ip });
     res.status(201).json({ success: true, user: rows[0] });
   } catch (err) { next(err); }
@@ -227,13 +250,13 @@ router.post('/register-collector', authRequired, validate(z.object({
 // POST /api/auth/change-pin
 router.post('/change-pin', authRequired, validate(z.object({
   oldPin: z.string().min(4).max(20),
-  newPin: z.string().min(4).max(20),
+  newPin: strongPin,
 })), async (req, res, next) => {
   try {
     const { rows } = await pool.query('SELECT pin_hash FROM users WHERE id=$1', [req.user.sub]);
     if (!rows[0]) return res.status(404).json({ success: false, error: 'not found' });
     const ok = await bcrypt.compare(String(req.body.oldPin), rows[0].pin_hash || '');
-    if (!ok) return res.status(401).json({ success: false, error: 'current PIN incorrect' });
+    if (!ok) return res.status(403).json({ success: false, error: 'current PIN incorrect' });
     const newHash = await bcrypt.hash(String(req.body.newPin), 12);
     await pool.query('UPDATE users SET pin_hash=$1, updated_at=now() WHERE id=$2', [newHash, req.user.sub]);
     await audit({ actorId: req.user.sub, action: 'change_pin', entityType: 'user', entityId: req.user.sub, ip: req.ip });

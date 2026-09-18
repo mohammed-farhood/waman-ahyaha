@@ -5,6 +5,7 @@ const { write: audit }               = require('../services/audit');
 const { body: validate, monthKey }   = require('../middleware/validate');
 const { donationLimiter }            = require('../middleware/rateLimit');
 const donations = require('../services/donations');
+const { MONTH_RE } = require('../services/month');
 const { z } = require('zod');
 
 const router = express.Router();
@@ -15,14 +16,24 @@ function scopedGroupId(req) {
   return req.user.groupId;
 }
 
-// GET /api/donations?groupId=&month=
+// GET /api/donations?groupId=&month=YYYY-MM     one month of one group
+// GET /api/donations?[groupId=]&from=YYYY-MM     every month since `from`
+//     (superadmin may omit groupId to get all groups in one request)
 router.get('/', authRequired, async (req, res, next) => {
   try {
     const groupId = scopedGroupId(req);
-    const { month } = req.query;
-    if (!groupId || !month) return res.status(400).json({ success: false, error: 'groupId and month required' });
-    const rows = await donations.getAllDonations(groupId, month);
-    res.json({ success: true, donations: rows });
+    const { month, from } = req.query;
+    if (!groupId && req.user.role !== 'superadmin') {
+      return res.status(400).json({ success: false, error: 'groupId required' });
+    }
+    if (month) {
+      if (!groupId || !MONTH_RE.test(month)) return res.status(400).json({ success: false, error: 'groupId and month (YYYY-MM) required' });
+      return res.json({ success: true, donations: await donations.getAllDonations(groupId, month) });
+    }
+    if (!from || !MONTH_RE.test(from)) {
+      return res.status(400).json({ success: false, error: 'month or from (YYYY-MM) required' });
+    }
+    res.json({ success: true, donations: await donations.getDonationsSince(from, groupId || null) });
   } catch (err) { next(err); }
 });
 
@@ -49,7 +60,7 @@ router.get('/streak', authRequired, async (req, res, next) => {
 });
 
 // GET /api/donations/at-risk?groupId=&collectorId=
-router.get('/at-risk', authRequired, async (req, res, next) => {
+router.get('/at-risk', ...roleRequired('collector', 'admin', 'superadmin'), async (req, res, next) => {
   try {
     const groupId = scopedGroupId(req);
     const { collectorId } = req.query;
@@ -92,14 +103,15 @@ router.put('/:groupId/:month/:userId',
         [groupId, month, userId]
       );
 
+      const { rows: donor } = await pool.query(
+        "SELECT collector_id, group_id FROM users WHERE id=$1 AND role='donor' AND deleted_at IS NULL", [userId]
+      );
+      if (!donor[0] || donor[0].group_id !== groupId) {
+        return res.status(400).json({ success: false, error: 'donor not in this campaign' });
+      }
       // Collector can only mark their own donors
-      if (req.user.role === 'collector') {
-        const { rows: donor } = await pool.query(
-          'SELECT collector_id FROM users WHERE id=$1', [userId]
-        );
-        if (!donor[0] || donor[0].collector_id !== req.user.sub) {
-          return res.status(403).json({ success: false, error: 'forbidden: not your donor' });
-        }
+      if (req.user.role === 'collector' && donor[0].collector_id !== req.user.sub) {
+        return res.status(403).json({ success: false, error: 'forbidden: not your donor' });
       }
 
       const row = await donations.upsertDonation({

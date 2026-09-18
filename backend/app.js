@@ -6,7 +6,7 @@ const rateLimit    = require('express-rate-limit');
 
 const csrf         = require('./middleware/csrf');
 const { errorHandler, notFound } = require('./middleware/errors');
-const { generalApiLimiter }      = require('./middleware/rateLimit');
+const { generalApiLimiter, userOrIp } = require('./middleware/rateLimit');
 
 const authRoutes          = require('./routes/auth');
 const usersRoutes         = require('./routes/users');
@@ -19,13 +19,17 @@ const supportMsgRoutes    = require('./routes/supportMessages');
 const payReportsRoutes    = require('./routes/payReports');
 const auditLogsRoutes     = require('./routes/auditLogs');
 const leaderboardRoutes   = require('./routes/leaderboard');
-const exportImportRoutes  = require('./routes/exportImport');
+const { exportRouter, importRouter } = require('./routes/exportImport');
 const telegramRoutes      = require('./routes/telegram');
 
 const CORS_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5500,http://localhost:8080,http://127.0.0.1:5500')
-  .split(',').map(s => s.trim());
+  .split(',').map(s => s.trim()).filter(Boolean);
 
 const app = express();
+
+// ── Trust proxy (Nginx sets X-Forwarded-For / -Proto) ────
+// Must come first: CORS below compares against req.protocol.
+app.set('trust proxy', 1);
 
 // ── Security headers ──────────────────────────────────────
 app.use(helmet({
@@ -33,22 +37,31 @@ app.use(helmet({
 }));
 
 // ── CORS ──────────────────────────────────────────────────
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || CORS_ORIGINS.includes(origin)) return cb(null, true);
-    console.warn(`[CORS] Blocked: ${origin}`);
-    cb(new Error('CORS: origin not allowed'));
-  },
-  credentials: true,
+// Browsers send an Origin header on same-origin POST/PUT/DELETE too, so the
+// page's own origin is always allowed; CORS_ORIGIN lists any *other* frontends.
+app.use(cors((req, cb) => {
+  const origin = req.header('Origin');
+  const self = `${req.protocol}://${req.get('host')}`;
+  if (!origin || origin === self || CORS_ORIGINS.includes(origin)) {
+    return cb(null, { origin: origin ? true : false, credentials: true });
+  }
+  console.warn(`[CORS] Blocked: ${origin}`);
+  const err = new Error('CORS: origin not allowed');
+  err.status = 403;
+  cb(err);
 }));
 
 // ── Body / cookies ────────────────────────────────────────
-app.use('/api/import', express.json({ limit: '50mb' }));
-app.use(express.json({ limit: '512kb' }));
+// Announcements carry a compressed image; the import route parses its own
+// (large) body *after* checking the caller is a superadmin.
 app.use(cookieParser());
-
-// ── Trust proxy (Nginx sets X-Forwarded-For) ─────────────
-app.set('trust proxy', 1);
+const jsonSmall = express.json({ limit: '512kb' });
+const jsonAnnouncement = express.json({ limit: '3mb' });
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/import')) return next();
+  if (req.path.startsWith('/api/announcements')) return jsonAnnouncement(req, res, next);
+  return jsonSmall(req, res, next);
+});
 
 // ── CSRF ──────────────────────────────────────────────────
 app.use('/api', csrf);
@@ -59,11 +72,10 @@ app.use('/api', generalApiLimiter);
 // ── Export rate limit: 5/day per superadmin (full exports only) ───
 const exportLimiter = rateLimit({
   windowMs: 24 * 3600 * 1000, max: 5,
-  keyGenerator: req => req.user?.sub || req.ip,
+  keyGenerator: userOrIp,
   handler: (req, res) => res.status(429).json({ success: false, error: 'export limited to 5 times per day' }),
   skip: req => req.path !== '/' && req.path !== '',
 });
-app.use('/api/export', exportLimiter);
 
 // ── Routes ────────────────────────────────────────────────
 app.use('/api/auth',             authRoutes);
@@ -77,12 +89,12 @@ app.use('/api/support-messages', supportMsgRoutes);
 app.use('/api/pay-reports',      payReportsRoutes);
 app.use('/api/audit-logs',       auditLogsRoutes);
 app.use('/api/leaderboard',      leaderboardRoutes);
-app.use('/api/export',           exportImportRoutes);
-app.use('/api/import',           exportImportRoutes);
+app.use('/api/export',           exportLimiter, exportRouter);
+app.use('/api/import',           importRouter);
 app.use('/api',                  telegramRoutes); // auth-code, check-auth, send-reminders, etc.
 
 // ── Health check ──────────────────────────────────────────
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '2.0.0', uptime: process.uptime() }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '2.1.0', uptime: process.uptime() }));
 
 // ── Error handling ────────────────────────────────────────
 app.use(notFound);

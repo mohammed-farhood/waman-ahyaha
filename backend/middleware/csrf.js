@@ -21,7 +21,10 @@ function csrf(req, res, next) {
   // Skip CSRF for unauthenticated public endpoints.
   // Use originalUrl (without query) because this middleware is mounted at /api,
   // so req.path is stripped of the /api prefix.
-  const PUBLIC = ['/api/auth/login', '/api/auth/register-donor', '/api/auth/refresh'];
+  // Visitor-facing forms (support message, new-campaign request) are included: the
+  // auth cookies are SameSite=Strict, so a cross-site post can't ride a session anyway.
+  const PUBLIC = ['/api/auth/login', '/api/auth/register-donor', '/api/auth/refresh',
+                  '/api/support-messages', '/api/campaign-requests'];
   const urlPath = (req.originalUrl || '').split('?')[0];
   if (PUBLIC.includes(urlPath)) return next();
 

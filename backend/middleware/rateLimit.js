@@ -1,4 +1,14 @@
 const rateLimit = require('express-rate-limit');
+const jwt       = require('jsonwebtoken');
+
+// Limiters mostly run before authRequired, so req.user isn't set yet. Key on the
+// user from a valid access cookie when there is one, otherwise on the client IP.
+// (Keying everyone on IP made a whole campus Wi-Fi share one budget.)
+function userOrIp(req) {
+  const t = req.cookies?.alayn_at;
+  if (t) { try { return 'u:' + jwt.verify(t, process.env.JWT_SECRET).sub; } catch {} }
+  return 'ip:' + req.ip;
+}
 
 function makeLimit(max, windowMinutes, keyFn) {
   return rateLimit({
@@ -6,7 +16,7 @@ function makeLimit(max, windowMinutes, keyFn) {
     max,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: keyFn || ((req) => req.ip),
+    keyGenerator: keyFn || userOrIp,
     handler: (req, res) =>
       res.status(429).json({ success: false, error: 'Too many requests, try again later.' }),
   });
@@ -17,23 +27,24 @@ const loginLimiter = makeLimit(isDev ? 100 : 5, isDev ? 1 : 15, (req) =>
   `${req.body?.phone || ''}::${req.ip}`
 );
 
-const registerDonorLimiter = makeLimit(3, 60);
+// Public self-registration only (staff add donors through POST /api/users/donors).
+const registerDonorLimiter = makeLimit(isDev ? 100 : 20, 60, (req) => req.ip);
 
-const generalApiLimiter = makeLimit(60, 1, (req) =>
-  req.user?.sub || req.ip
-);
+const generalApiLimiter = makeLimit(300, 1);
 
-const announcementLimiter = makeLimit(5, 1, (req) => req.user?.sub || req.ip);
+const announcementLimiter = makeLimit(5, 1);
 
-const donationLimiter = makeLimit(60, 1, (req) => req.user?.sub || req.ip);
+const donationLimiter = makeLimit(120, 1);
 
-const supportMsgLimiter = makeLimit(5, 60, (req) => req.user?.sub || req.ip);
+// Visitor-facing writes: support messages, new-campaign requests.
+const supportMsgLimiter = makeLimit(5, 60);
 
 const telegramLimiter = makeLimit(10, 1, (req) =>
-  req.user?.groupId || req.ip
+  req.user?.groupId || userOrIp(req)
 );
 
 module.exports = {
+  userOrIp,
   loginLimiter,
   registerDonorLimiter,
   generalApiLimiter,

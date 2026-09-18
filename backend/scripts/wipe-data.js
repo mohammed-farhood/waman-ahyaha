@@ -72,7 +72,9 @@ async function main() {
       // Preserve superadmins; remove their group affiliation since groups are wiped.
       await client.query(`DELETE FROM users WHERE role <> 'superadmin'`);
       await client.query(`UPDATE users SET group_id = NULL, collector_id = NULL WHERE role = 'superadmin'`);
-      await client.query('TRUNCATE TABLE groups RESTART IDENTITY CASCADE');
+      // DELETE, not TRUNCATE ... CASCADE: a cascading truncate follows
+      // users.group_id and empties the users table, superadmins included.
+      await client.query('DELETE FROM groups');
     }
 
     await client.query('COMMIT');

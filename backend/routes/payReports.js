@@ -1,13 +1,16 @@
 const express = require('express');
 const pool    = require('../db/pool');
-const { authRequired, roleRequired, assertGroup } = require('../middleware/auth');
+const { roleRequired, assertGroup } = require('../middleware/auth');
 const { write: audit }               = require('../services/audit');
-const { body: validate, monthKey }   = require('../middleware/validate');
+const { body: validate }             = require('../middleware/validate');
+const { monthKey: currentMonth, MONTH_RE } = require('../services/month');
 const { z } = require('zod');
 
 const router = express.Router();
+const STAFF = ['collector', 'admin', 'superadmin'];
 
-router.get('/', authRequired, async (req, res, next) => {
+// A pay report says "donor X of another collector paid me". Staff only.
+router.get('/', ...roleRequired(...STAFF), async (req, res, next) => {
   try {
     // Non-superadmin pinned to own group; superadmin may pass any groupId or none.
     const groupId = req.user.role === 'superadmin' ? req.query.groupId : req.user.groupId;
@@ -21,11 +24,11 @@ router.get('/', authRequired, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.post('/', authRequired, validate(z.object({
+router.post('/', ...roleRequired(...STAFF), validate(z.object({
   groupId:    z.string().min(1),
   donorId:    z.string().min(1),
-  monthKey:   z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
-  amount:     z.number().int().min(0).optional(),
+  monthKey:   z.string().regex(MONTH_RE).optional(),
+  amount:     z.number().int().min(0).max(100_000_000).optional(),
   note:       z.string().max(500).optional(),
 })), async (req, res, next) => {
   try {
@@ -42,23 +45,32 @@ router.post('/', authRequired, validate(z.object({
     const id = 'pr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     await pool.query(
       'INSERT INTO pay_reports(id,group_id,reporter_id,donor_id,month_key,amount,note) VALUES($1,$2,$3,$4,$5,$6,$7)',
-      [id, b.groupId, req.user.sub, b.donorId, b.monthKey, b.amount || null, b.note || null]
+      [id, b.groupId, req.user.sub, b.donorId, b.monthKey || currentMonth(), b.amount || null, b.note || null]
     );
+    const { rows } = await pool.query('SELECT * FROM pay_reports WHERE id=$1', [id]);
     await audit({ actorId: req.user.sub, action: 'create_pay_report', entityType: 'pay_report', entityId: id, ip: req.ip });
-    res.status(201).json({ success: true, id });
+    res.status(201).json({ success: true, id, report: rows[0] });
   } catch (err) { next(err); }
 });
 
-router.post('/:id/acknowledge', ...roleRequired('admin', 'superadmin'), async (req, res, next) => {
+// Acknowledged by an admin of the campaign, or by the donor's own collector
+// (the person whose grid the payment belongs in).
+router.post('/:id/acknowledge', ...roleRequired(...STAFF), async (req, res, next) => {
   try {
-    const { rows: cur } = await pool.query('SELECT group_id FROM pay_reports WHERE id=$1', [req.params.id]);
+    const { rows: cur } = await pool.query(
+      `SELECT r.group_id, u.collector_id AS donor_collector
+       FROM pay_reports r LEFT JOIN users u ON u.id = r.donor_id
+       WHERE r.id=$1`, [req.params.id]
+    );
     if (!cur[0]) return res.status(404).json({ success: false, error: 'not found' });
     if (!assertGroup(req, res, cur[0].group_id)) return;
+    if (req.user.role === 'collector' && cur[0].donor_collector !== req.user.sub) {
+      return res.status(403).json({ success: false, error: 'forbidden: not your donor' });
+    }
     const { rows } = await pool.query(
       'UPDATE pay_reports SET acknowledged=TRUE, acknowledged_at=now() WHERE id=$1 RETURNING *',
       [req.params.id]
     );
-    if (!rows[0]) return res.status(404).json({ success: false, error: 'not found' });
     await audit({ actorId: req.user.sub, action: 'acknowledge_pay_report', entityType: 'pay_report', entityId: req.params.id, ip: req.ip });
     res.json({ success: true, report: rows[0] });
   } catch (err) { next(err); }

@@ -1,13 +1,26 @@
 const express = require('express');
 const crypto  = require('crypto');
 const pool    = require('../db/pool');
-const { authRequired } = require('../middleware/auth');
+const { roleRequired } = require('../middleware/auth');
 const { reminderQueue, getDefaultUsername } = require('../services/telegramBot');
 const { body: validate } = require('../middleware/validate');
 const { telegramLimiter } = require('../middleware/rateLimit');
 const { z } = require('zod');
 
 const router = express.Router();
+const STAFF = ['collector', 'admin', 'superadmin'];
+
+// Only chats that belong to members of the caller's own campaign can be messaged
+// (superadmin: any registered member). Stops the bot being used to spam strangers.
+async function allowedChats(req, chatIds) {
+  const ids = [...new Set(chatIds.map(String))].filter(c => /^-?\d{1,20}$/.test(c));
+  if (!ids.length) return new Set();
+  const params = [ids];
+  let where = 'telegram_chat_id = ANY($1::bigint[]) AND deleted_at IS NULL';
+  if (req.user.role !== 'superadmin') { params.push(req.user.groupId); where += ' AND group_id = $2'; }
+  const { rows } = await pool.query(`SELECT telegram_chat_id::text AS c FROM users WHERE ${where}`, params);
+  return new Set(rows.map(r => r.c));
+}
 
 function sanitizeHtml(str) {
   return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -22,7 +35,7 @@ function validateMessages(messages) {
 }
 
 // POST /api/auth-code  — generate linking code (auth not required, but session-aware)
-router.post('/auth-code', async (req, res, next) => {
+router.post('/auth-code', telegramLimiter, async (req, res, next) => {
   try {
     // groupId from authenticated session if available; anonymous allowed for initial link
     let groupId = null;
@@ -58,6 +71,9 @@ router.post('/auth-code', async (req, res, next) => {
       }
     }
 
+    if (!botUsername) {
+      return res.status(503).json({ success: false, error: 'telegram bot not configured' });
+    }
     res.json({ success: true, code, botUsername });
   } catch (err) { next(err); }
 });
@@ -72,7 +88,7 @@ router.get('/check-auth/:code', async (req, res, next) => {
 });
 
 // POST /api/send-reminders
-router.post('/send-reminders', authRequired, telegramLimiter, validate(z.object({
+router.post('/send-reminders', ...roleRequired(...STAFF), telegramLimiter, validate(z.object({
   messages: z.array(z.object({
     chatId: z.union([z.string(), z.number()]),
     text:   z.string().min(1).max(4000),
@@ -80,18 +96,19 @@ router.post('/send-reminders', authRequired, telegramLimiter, validate(z.object(
 })), async (req, res, next) => {
   try {
     const groupId = req.user.groupId || null;
-    const batch = req.body.messages.map(m => ({
+    const ok = await allowedChats(req, req.body.messages.map(m => m.chatId));
+    const batch = req.body.messages.filter(m => ok.has(String(m.chatId))).map(m => ({
       chatId: m.chatId,
       text: sanitizeHtml(m.text),
       groupId,
     }));
-    reminderQueue.add(batch);
+    if (batch.length) reminderQueue.add(batch);
     res.json({ success: true, status: 'queued', count: batch.length });
   } catch (err) { next(err); }
 });
 
 // POST /api/send-receipt
-router.post('/send-receipt', authRequired, validate(z.object({
+router.post('/send-receipt', ...roleRequired(...STAFF), telegramLimiter, validate(z.object({
   chatId:        z.union([z.string(), z.number()]),
   donorName:     z.string().optional(),
   amount:        z.number(),
@@ -100,11 +117,14 @@ router.post('/send-receipt', authRequired, validate(z.object({
 })), async (req, res, next) => {
   try {
     const { chatId, donorName, amount, month, collectorName } = req.body;
+    if (!(await allowedChats(req, [chatId])).has(String(chatId))) {
+      return res.status(403).json({ success: false, error: 'forbidden: chat not in this campaign' });
+    }
     const name      = sanitizeHtml(donorName || '');
     const collector = sanitizeHtml(collectorName || 'غير محدد');
     const text = `🧾 <b>وصل استلام تبرع كفالة أيتام</b> 🧾\n\n` +
                  `مرحباً ${name}،\n` +
-                 `تم استلام تبرعك لشهر <b>${month}</b> بنجاح.\n\n` +
+                 `تم استلام تبرعك لشهر <b>${sanitizeHtml(month)}</b> بنجاح.\n\n` +
                  `💰 <b>المبلغ</b>: ${amount} دينار عراقي\n` +
                  `👤 <b>الجامع</b>: ${collector}\n` +
                  `📅 <b>التاريخ</b>: ${new Date().toLocaleDateString('ar-EG-u-nu-latn')}\n\n` +
@@ -115,7 +135,7 @@ router.post('/send-receipt', authRequired, validate(z.object({
 });
 
 // POST /api/notify-location
-router.post('/notify-location', authRequired, validate(z.object({
+router.post('/notify-location', ...roleRequired(...STAFF), telegramLimiter, validate(z.object({
   chatIds:       z.array(z.union([z.string(), z.number()])).min(1).max(100),
   collectorName: z.string().optional(),
   lat:           z.number().min(-90).max(90),
@@ -129,8 +149,10 @@ router.post('/notify-location', authRequired, validate(z.object({
                  `جامع التبرعات (${name}) متواجد حالياً ويستقبل التبرعات.\n\n` +
                  `اضغط على الرابط أدناه للوصول إلى موقعه على الخريطة:\n${mapLink}\n\n` +
                  `إدارة تطبيق ومن أحياها`;
-    const messages = chatIds.map(chatId => ({ chatId, text, groupId: req.user.groupId || null }));
-    reminderQueue.add(messages);
+    const ok = await allowedChats(req, chatIds);
+    const messages = chatIds.filter(c => ok.has(String(c)))
+      .map(chatId => ({ chatId, text, groupId: req.user.groupId || null }));
+    if (messages.length) reminderQueue.add(messages);
     res.json({ success: true, status: 'location_queued', count: messages.length });
   } catch (err) { next(err); }
 });

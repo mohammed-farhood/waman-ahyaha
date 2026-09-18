@@ -1,7 +1,8 @@
 const express = require('express');
 const bcrypt  = require('bcryptjs');
 const pool    = require('../db/pool');
-const { authRequired, roleRequired } = require('../middleware/auth');
+const { authRequired, roleRequired, assertGroup } = require('../middleware/auth');
+const { monthKey, MONTH_RE } = require('../services/month');
 const { write: audit }               = require('../services/audit');
 const { body: validate }             = require('../middleware/validate');
 const { z } = require('zod');
@@ -12,8 +13,15 @@ const router = express.Router();
 // Returns only campaign-discovery fields; nothing sensitive.
 router.get('/', async (req, res, next) => {
   try {
+    // Also: donor count (landing page totals) and collector names only (the
+    // sign-up form lets a new donor pick their collector before logging in).
     const { rows } = await pool.query(
-      'SELECT id,name,university,icon,orphans_sponsored,cost_per_orphan,monthly_goal,default_pledge,created_at FROM groups WHERE deleted_at IS NULL ORDER BY created_at'
+      `SELECT g.id,g.name,g.university,g.icon,g.orphans_sponsored,g.cost_per_orphan,g.monthly_goal,g.default_pledge,g.created_at,
+         (SELECT COUNT(*)::int FROM users u
+           WHERE u.group_id=g.id AND u.role='donor' AND u.deleted_at IS NULL) AS donor_count,
+         COALESCE((SELECT json_agg(json_build_object('id',u.id,'name',u.name) ORDER BY u.name) FROM users u
+           WHERE u.group_id=g.id AND u.role='collector' AND u.deleted_at IS NULL), '[]'::json) AS collectors
+       FROM groups g WHERE g.deleted_at IS NULL ORDER BY g.created_at`
     );
     res.json({ success: true, groups: rows });
   } catch (err) { next(err); }
@@ -34,8 +42,9 @@ router.get('/:id', authRequired, async (req, res, next) => {
 // GET /api/groups/:id/stats?month=YYYY-MM
 router.get('/:id/stats', authRequired, async (req, res, next) => {
   try {
+    if (!assertGroup(req, res, req.params.id)) return;
     const { getMonthlyStats } = require('../services/donations');
-    const month = req.query.month || new Date().toISOString().slice(0, 7);
+    const month = MONTH_RE.test(req.query.month || '') ? req.query.month : monthKey();
     const stats = await getMonthlyStats(req.params.id, month);
     res.json({ success: true, stats });
   } catch (err) { next(err); }
@@ -124,7 +133,8 @@ router.post('/:id/full-delete', ...roleRequired('superadmin'), validate(z.object
     const { rows: actor } = await client.query('SELECT pin_hash FROM users WHERE id=$1', [req.user.sub]);
     if (!actor[0]) return res.status(404).json({ success: false, error: 'user not found' });
     const ok = await bcrypt.compare(String(req.body.pin), actor[0].pin_hash || '');
-    if (!ok) return res.status(401).json({ success: false, error: 'current PIN incorrect' });
+    // 403, not 401: a 401 makes the client think the session expired and log out.
+    if (!ok) return res.status(403).json({ success: false, error: 'current PIN incorrect' });
 
     // 2) Group must exist.
     const { rows: g } = await client.query('SELECT * FROM groups WHERE id=$1', [req.params.id]);
@@ -174,12 +184,14 @@ router.post('/:id/bot-token', ...roleRequired('admin', 'superadmin'), validate(z
   botToken: z.string().regex(/^\d{8,10}:[A-Za-z0-9_-]{35}$/, 'invalid bot token format'),
 })), async (req, res, next) => {
   try {
+    if (!assertGroup(req, res, req.params.id)) return;
     const key = process.env.PG_ENC_KEY;
     if (!key) return res.status(500).json({ success: false, error: 'encryption key not configured' });
-    await pool.query(
-      'UPDATE groups SET telegram_bot_token_enc=pgp_sym_encrypt($1,$2) WHERE id=$3',
+    const r = await pool.query(
+      'UPDATE groups SET telegram_bot_token_enc=pgp_sym_encrypt($1,$2) WHERE id=$3 AND deleted_at IS NULL',
       [req.body.botToken, key, req.params.id]
     );
+    if (!r.rowCount) return res.status(404).json({ success: false, error: 'not found' });
     await audit({ actorId: req.user.sub, action: 'set_bot_token', entityType: 'group', entityId: req.params.id, ip: req.ip });
     res.json({ success: true });
   } catch (err) { next(err); }
