@@ -1,42 +1,38 @@
 #!/usr/bin/env bash
-# AL-AYN Deploy / Redeploy Script
-# Run from the VPS as user 'alayn' (or root adjusting paths).
-# Usage:  bash deploy.sh
+# AL-AYN — deploy / redeploy from your Mac to the VPS.
+# Usage (from the repo root):  bash deploy/deploy.sh
+#
+# Copies exactly what is in this folder (commit first!), installs backend
+# dependencies on the server, restarts the API and checks it is healthy.
+# First time only: afterwards run  ssh sinan-vps bash /opt/al-ayn/deploy/setup-server.sh
 set -euo pipefail
 
-REPO_URL="https://github.com/mohammed-farhood/AL-AYN.git"
-APP_DIR="/var/www/al-ayn"
-SRC_DIR="$APP_DIR/src"
-FE_DIR="$APP_DIR/frontend"
-BE_DIR="$APP_DIR/backend"
+HOST=${DEPLOY_HOST:-sinan-vps}
+APP=/opt/al-ayn
+cd "$(dirname "$0")/.."
 
-echo "=== [1/5] Clone / update repo ==="
-if [ -d "$SRC_DIR/.git" ]; then
-  git -C "$SRC_DIR" pull --ff-only
-else
-  git clone "$REPO_URL" "$SRC_DIR"
+if [ -n "$(git status --porcelain)" ]; then
+  echo "[WARN] Uncommitted changes — they will be deployed but are not saved in git."
 fi
 
-echo "=== [2/5] Copy frontend ==="
-rsync -av --delete \
-  "$SRC_DIR/index.html" "$SRC_DIR/css/" "$SRC_DIR/js/" \
-  "$SRC_DIR/favicon.svg" "$SRC_DIR/logo.png" "$SRC_DIR/manifest.json" \
-  "$FE_DIR/"
+echo "=== [1/4] Frontend ==="
+ssh "$HOST" "mkdir -p $APP/frontend/css $APP/frontend/js $APP/frontend/icons $APP/backend $APP/deploy"
+rsync -az --chmod=D755,F644 \
+  index.html favicon.svg logo.png manifest.json "$HOST:$APP/frontend/"
+rsync -az --delete --chmod=D755,F644 css/ "$HOST:$APP/frontend/css/"
+rsync -az --delete --chmod=D755,F644 icons/ "$HOST:$APP/frontend/icons/"
+rsync -az --delete --chmod=D755,F644 --exclude=vendor/ js/ "$HOST:$APP/frontend/js/"
 
-echo "=== [3/5] Install backend deps ==="
-rsync -av --delete --exclude=node_modules --exclude=.env \
-  "$SRC_DIR/backend/" "$BE_DIR/"
-cd "$BE_DIR" && npm ci --omit=dev
+echo "=== [2/4] Backend + deploy files ==="
+rsync -az --delete --chmod=D755,F644 --exclude=node_modules --exclude=.env backend/ "$HOST:$APP/backend/"
+rsync -az --delete --chmod=D755,F644 deploy/ "$HOST:$APP/deploy/"
 
-echo "=== [4/5] Reload API ==="
-if pm2 list | grep -q al-ayn-api; then
-  pm2 reload al-ayn-api
+echo "=== [3/4] Install dependencies ==="
+ssh "$HOST" "cd $APP/backend && npm ci --omit=dev --no-audit --no-fund --loglevel=error"
+
+echo "=== [4/4] Restart + health check ==="
+ssh "$HOST" "if systemctl list-unit-files al-ayn.service >/dev/null 2>&1 && systemctl is-enabled al-ayn >/dev/null 2>&1; then
+  systemctl restart al-ayn && sleep 3 && curl -fsS http://127.0.0.1:7860/health && echo
 else
-  cd "$BE_DIR" && pm2 start ecosystem.config.js && pm2 save
-fi
-
-echo "=== [5/5] Reload Nginx ==="
-nginx -t && systemctl reload nginx
-
-echo "=== Deploy complete ==="
-curl -s http://localhost:7860/health || echo "[WARN] health check failed"
+  echo '[INFO] Service not installed yet — run: ssh $HOST bash $APP/deploy/setup-server.sh'
+fi"

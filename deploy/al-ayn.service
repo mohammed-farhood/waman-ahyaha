@@ -1,0 +1,26 @@
+[Unit]
+Description=AL-AYN donation tracker API (al-ayn.srv1956050.hstgr.cloud)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=alayn
+Group=alayn
+WorkingDirectory=/opt/al-ayn/backend
+# Secrets, DATABASE_URL, superadmin bootstrap values. root:alayn 0640.
+EnvironmentFile=/etc/al-ayn/al-ayn.env
+Environment=NODE_ENV=production
+Environment=PORT=7860
+Environment=HOST=127.0.0.1
+ExecStart=/usr/bin/env node server.js
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
