@@ -26,13 +26,21 @@ const App = {
   },
 
   async init() {
-    const theme = DB.getSetting('theme', 'light');
+    const savedTheme = DB.getSetting('theme', null);
+    const theme = savedTheme
+      || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     document.documentElement.setAttribute('data-theme', theme);
     this._updateThemeIcon();
+    this._guardAsync(['handleLogin', 'handleRegister', 'handleAddDonor', 'handleAddCollector',
+      '_submitPayReport', 'submitCampaignRequest', 'submitSupportMessage', 'handleAddOrphan',
+      'handleEditOrphan', 'handleAvailability', 'sendBotReminders', 'acknowledgePayReport',
+      'submitDeleteAccount']);
+    this._initChrome();
     console.log("WAMAN-AHYAHA App Initialized v4.0.0");
 
     // Re-authenticate with server if we have a cached session
     if (Auth.isLoggedIn()) {
+      this._renderSkeleton();
       const result = await Auth.bootstrap().catch(() => ({ error: 'bootstrap failed' }));
       if (result.error === 'unauthenticated') {
         DB.logout();
@@ -145,18 +153,21 @@ const App = {
     const viewId = `view-${viewName}`;
     const navBrand = document.querySelector('.nav-brand');
     const btnLogout = document.getElementById('btn-logout');
+    const btnRefresh = document.getElementById('btn-refresh');
     const btnBack = document.getElementById('btn-back');
 
     if (viewId === 'view-landing' || viewId === 'view-login' || viewId === 'view-register') {
       bottomNav.classList.add('hidden');
       navBrand.style.pointerEvents = 'none';
       if(btnLogout) btnLogout.style.display = 'none';
+      if(btnRefresh) btnRefresh.style.display = 'none';
       if(btnBack) btnBack.style.display = 'none';
       setTimeout(() => document.getElementById('main-content').scrollTop = 0, 50);
     } else {
       bottomNav.classList.remove('hidden');
       navBrand.style.pointerEvents = 'auto';
       if(btnLogout) btnLogout.style.display = 'inline-flex';
+      if(btnRefresh) btnRefresh.style.display = 'inline-flex';
       
       // Show back button on all auth views EXCEPT home
       if(btnBack) {
@@ -184,15 +195,193 @@ const App = {
     return el;
   },
 
+
   // ── TOAST ────────────────────────────────────────────────
-  toast(msg, type = 'success') {
+  // toast(msg, 'success'|'error'|'warning'|'info', { duration, action: { label, onClick } })
+  toast(msg, type = 'success', opts = {}) {
     const container = document.getElementById('toast-container');
+    if (!container) return;
+    while (container.children.length >= 3) container.firstElementChild.remove();
+    const life = opts.duration || (type === 'error' ? 6000 : type === 'warning' ? 4500 : 3200);
+    const color = { success: 'success', error: 'danger', warning: 'warning', info: 'primary' }[type] || 'success';
+    const icons = {
+      success: Icons.check,
+      error: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+      warning: Icons.bell,
+      info: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
+    };
     const t = document.createElement('div');
-    const icons = { success: Icons.check, error: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`, warning: Icons.bell };
     t.className = `toast toast-${type}`;
-    t.innerHTML = `<span class="icon icon-sm" style="color:var(--${type==='success'?'success':type==='error'?'danger':'warning'})">${icons[type]||icons.success}</span><span class="toast-text">${this.esc(msg)}</span>`;
+    t.style.setProperty('--toast-life', life + 'ms');
+    t.innerHTML = `<span class="icon icon-sm" style="color:var(--${color})">${icons[type] || icons.success}</span>`
+      + `<span class="toast-text">${this.esc(msg)}</span>`
+      + (opts.action ? `<button class="toast-action" type="button">${this.esc(opts.action.label)}</button>` : '');
+    let timer;
+    const remove = () => { clearTimeout(timer); t.remove(); };
+    t.addEventListener('click', remove);                         // tap to dismiss
+    if (opts.action) {
+      t.querySelector('.toast-action').addEventListener('click', (e) => {
+        e.stopPropagation(); remove(); opts.action.onClick();
+      });
+    }
     container.appendChild(t);
-    setTimeout(() => t.remove(), 3200);
+    timer = setTimeout(() => t.remove(), life);
+    return t;
+  },
+
+  // Busy state + double-tap protection for async actions. Wraps the named App
+  // methods: the button that triggered the call gets a spinner and is disabled
+  // until the action finishes; repeated calls while it runs are ignored.
+  _guardAsync(names) {
+    this._busy = this._busy || {};
+    names.forEach(name => {
+      const fn = this[name];
+      if (typeof fn !== 'function') return;
+      this[name] = async function (...args) {
+        if (this._busy[name]) return;
+        const ev = window.event;
+        let btn = ev && ev.target && ev.target.closest ? ev.target.closest('button') : null;
+        if (!btn) btn = document.querySelector('.modal-overlay.active [data-primary], .view.active [data-primary]');
+        this._busy[name] = true;
+        if (btn) {
+          btn.disabled = true;
+          btn.setAttribute('aria-busy', 'true');
+          btn.insertAdjacentHTML('afterbegin', '<span class="btn-spinner" aria-hidden="true"></span>');
+        }
+        try { return await fn.apply(this, args); }
+        finally {
+          this._busy[name] = false;
+          if (btn && btn.isConnected) {
+            btn.disabled = false;
+            btn.removeAttribute('aria-busy');
+            btn.querySelector(':scope > .btn-spinner')?.remove();
+          }
+        }
+      };
+    });
+  },
+
+  // App-wide chrome: keyboard shortcuts in modals, offline/pending pill,
+  // refresh button, quiet refresh when returning to the app.
+  _initChrome() {
+    const refreshBtn = document.getElementById('btn-refresh');
+    if (refreshBtn) refreshBtn.innerHTML = Icons.refresh;
+
+    document.addEventListener('keydown', (e) => {
+      const ov = document.getElementById('modal-overlay');
+      if (!ov || !ov.classList.contains('active')) return;
+      if (e.key === 'Escape') { e.preventDefault(); this.closeModal(); return; }
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        const el = e.target;
+        // Inputs with their own Enter handler keep it; textareas keep new lines.
+        if (!el || el.tagName !== 'INPUT' || el.hasAttribute('onkeyup') || el.hasAttribute('onkeydown')) return;
+        if (['checkbox', 'radio', 'file', 'button', 'submit'].includes(el.type)) return;
+        const primary = ov.querySelector('[data-primary]')
+          || ov.querySelector('.btn-primary:not([disabled]), .btn-gold:not([disabled])');
+        if (primary) { e.preventDefault(); primary.click(); }
+      }
+    });
+
+    const upd = () => this._updateSyncPill();
+    window.addEventListener('online', upd);
+    window.addEventListener('offline', upd);
+    setInterval(upd, 3000);
+    upd();
+
+    this._lastRefresh = Date.now();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && Auth.isLoggedIn()
+          && Date.now() - (this._lastRefresh || 0) > 5 * 60 * 1000) {
+        this.refresh({ silent: true });
+      }
+    });
+  },
+
+  _updateSyncPill() {
+    const pill = document.getElementById('sync-pill');
+    if (!pill) return;
+    const n = typeof SyncQueue !== 'undefined' ? SyncQueue.pendingCount() : 0;
+    if (!navigator.onLine) {
+      pill.className = 'sync-pill offline';
+      pill.innerHTML = '<span class="dot"></span>غير متصل' + (n ? ` · ${this.fmt(n)}` : '');
+      pill.title = n ? `${n} تغيير بانتظار عودة الاتصال` : 'لا يوجد اتصال بالإنترنت';
+    } else if (n > 0) {
+      pill.className = 'sync-pill';
+      pill.innerHTML = `<span class="dot"></span>جاري الحفظ (${this.fmt(n)})`;
+      pill.title = 'تغييرات بانتظار الرفع إلى الخادم';
+    } else {
+      pill.className = 'sync-pill hidden';
+      pill.textContent = '';
+    }
+  },
+
+  // Re-render the current screen without navigation side effects.
+  _rerender() {
+    const fn = { home: 'renderHome', grid: 'renderGrid', news: 'renderNews', leaderboard: 'renderLeaderboard',
+      collectors: 'renderCollectors', profile: 'renderProfile', institution: 'renderInstitution',
+      orphans: 'renderOrphans' }[this.currentView];
+    if (!fn) return;
+    const y = window.scrollY;
+    this[fn]();
+    window.scrollTo(0, y);
+  },
+
+  async refresh({ silent = false } = {}) {
+    if (this._refreshing || !Auth.isLoggedIn()) return;
+    this._refreshing = true;
+    const btn = document.getElementById('btn-refresh');
+    btn?.classList.add('is-spinning');
+    try {
+      SyncQueue._flush();
+      const r = await Auth.bootstrap();
+      if (r?.error) throw new Error(r.error);
+      this._lastRefresh = Date.now();
+      if (!document.getElementById('modal-overlay').classList.contains('active')) this._rerender();
+      if (!silent) this.toast('تم تحديث البيانات', 'info');
+    } catch {
+      if (!silent) this.toast('تعذر التحديث، تحقق من الاتصال', 'error');
+    } finally {
+      this._refreshing = false;
+      btn?.classList.remove('is-spinning');
+    }
+  },
+
+  // Placeholder shown while the saved session loads (instead of a blank screen).
+  _renderSkeleton() {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const v = document.getElementById('view-home');
+    if (!v) return;
+    v.classList.add('active');
+    v.innerHTML = `
+      <div class="container" aria-busy="true" aria-label="جاري التحميل">
+        <div class="skeleton sk-hero"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+          <div class="skeleton sk-stat"></div><div class="skeleton sk-stat"></div>
+          <div class="skeleton sk-stat"></div><div class="skeleton sk-stat"></div>
+        </div>
+        <div class="skeleton sk-line" style="width:40%"></div>
+        <div class="skeleton sk-card"></div><div class="skeleton sk-card"></div><div class="skeleton sk-card"></div>
+      </div>`;
+  },
+
+  // Month pills above the grid: jump to that month's column and flash it.
+  _focusMonth(i) {
+    document.querySelectorAll('#view-grid .month-pill').forEach((p, j) => p.classList.toggle('active', j === i));
+    const th = document.querySelector(`#view-grid .donation-grid th[data-month="${i}"]`);
+    if (!th) return;
+    th.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    document.querySelectorAll(`#view-grid .donation-grid tr > :nth-child(${i + 2})`).forEach(c => {
+      c.classList.remove('col-flash'); void c.offsetWidth; c.classList.add('col-flash');
+    });
+  },
+
+  _changeLoginPhone() {
+    const phone = document.getElementById('login-phone');
+    const pinGroup = document.getElementById('pin-group');
+    const pin = document.getElementById('login-pin');
+    if (pin) pin.value = '';
+    pinGroup?.classList.add('hidden');
+    if (phone) { phone.disabled = false; phone.focus(); phone.select(); }
   },
 
   // ── FORMAT HELPERS ───────────────────────────────────────
@@ -218,20 +407,44 @@ const App = {
     this._updateThemeIcon();
   },
   _updateThemeIcon() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    // Browser / phone status bar matches the top bar.
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark ? '#1E293B' : '#FFFFFF');
     const btn = document.getElementById('btn-theme');
     if (!btn) return;
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     btn.innerHTML = isDark ? Icons.sun : Icons.moon;
   },
 
   // ── MODAL ────────────────────────────────────────────────
   closeModal() {
-    document.getElementById('modal-overlay').classList.remove('active');
+    const ov = document.getElementById('modal-overlay');
+    if (!ov || !ov.classList.contains('active')) return;
+    ov.classList.remove('active');
+    document.body.classList.remove('modal-open');
+    const back = this._modalReturnFocus;
+    this._modalReturnFocus = null;
+    if (back && back.isConnected && typeof back.focus === 'function') {
+      try { back.focus({ preventScroll: true }); } catch {}
+    }
   },
   _openModal(html) {
+    const ov = document.getElementById('modal-overlay');
     const m = document.getElementById('modal-content');
+    if (!ov.classList.contains('active')) this._modalReturnFocus = document.activeElement;
     m.innerHTML = `<div class="modal-handle"></div>${html}`;
-    document.getElementById('modal-overlay').classList.add('active');
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    const title = m.querySelector('.modal-title');
+    if (title) { title.id = 'modal-title'; m.setAttribute('aria-labelledby', 'modal-title'); }
+    else m.removeAttribute('aria-labelledby');
+    m.scrollTop = 0;
+    ov.classList.add('active');
+    document.body.classList.add('modal-open');
+    // Focus the first field where there is a physical keyboard; on phones that
+    // would pop the on-screen keyboard over the form uninvited.
+    if (window.matchMedia && window.matchMedia('(hover: hover)').matches) {
+      setTimeout(() => m.querySelector('input:not([type=hidden]):not([disabled]), textarea, select')?.focus(), 60);
+    }
   },
 
   // ─────────────────────────────────────────────────────────
@@ -308,13 +521,16 @@ const App = {
           </div>
           <div class="form-group">
             <label class="form-label">رقم الهاتف</label>
-            <input type="tel" id="login-phone" class="form-input" placeholder="07xxxxxxxxx" dir="ltr" style="text-align:center;font-size:1.1rem;letter-spacing:2px" onkeyup="if(event.key==='Enter')App.handleLogin()">
+            <input type="tel" id="login-phone" class="form-input" placeholder="07xxxxxxxxx" autocomplete="tel" inputmode="tel" enterkeyhint="next" dir="ltr" style="text-align:center;font-size:1.1rem;letter-spacing:2px" onkeyup="if(event.key==='Enter')App.handleLogin()">
           </div>
           <div id="pin-group" class="form-group hidden" style="margin-top:16px;">
-            <label class="form-label">رمز الدخول / كلمة المرور</label>
-            <input type="password" id="login-pin" class="form-input" placeholder="••••" maxlength="20" autocomplete="current-password" style="text-align:center;font-size:1.25rem;letter-spacing:4px" onkeyup="if(event.key==='Enter')App.handleLogin()">
+            <div class="flex-between" style="margin-bottom:6px">
+              <label class="form-label" for="login-pin" style="margin:0">رمز الدخول / كلمة المرور</label>
+              <button type="button" class="btn btn-ghost btn-xs" onclick="App._changeLoginPhone()">تغيير الرقم</button>
+            </div>
+            <input type="password" id="login-pin" class="form-input" placeholder="••••" maxlength="20" autocomplete="current-password" enterkeyhint="go" style="text-align:center;font-size:1.25rem;letter-spacing:4px" onkeyup="if(event.key==='Enter')App.handleLogin()">
           </div>
-          <button class="btn btn-primary w-full btn-lg" onclick="App.handleLogin()">
+          <button class="btn btn-primary w-full btn-lg" data-primary onclick="App.handleLogin()">
             <span class="icon icon-sm">${Icons.shield}</span>دخول
           </button>
           <div class="auth-divider">أو</div>
@@ -377,11 +593,11 @@ const App = {
           </div>
           <div class="form-group">
             <label class="form-label">الاسم الكامل</label>
-            <input type="text" id="reg-name" class="form-input" placeholder="اسمك الكريم">
+            <input type="text" id="reg-name" class="form-input" placeholder="اسمك الكريم" autocomplete="name" enterkeyhint="next">
           </div>
           <div class="form-group">
             <label class="form-label">رقم الهاتف</label>
-            <input type="tel" id="reg-phone" class="form-input" placeholder="07xxxxxxxxx" dir="ltr" style="text-align:center">
+            <input type="tel" id="reg-phone" class="form-input" placeholder="07xxxxxxxxx" autocomplete="tel" inputmode="tel" dir="ltr" style="text-align:center">
           </div>
           <div class="form-group">
             <label class="form-label">المجموعة الجامعية</label>
@@ -416,7 +632,7 @@ const App = {
             </div>
             <label class="toggle"><input type="checkbox" id="reg-is-anonymous"><span class="toggle-slider"></span></label>
           </div>
-          <button class="btn btn-primary w-full btn-lg" style="margin-top:16px" onclick="App.handleRegister()">إنشاء الحساب</button>
+          <button class="btn btn-primary w-full btn-lg" style="margin-top:16px" data-primary onclick="App.handleRegister()">إنشاء الحساب</button>
           <div style="text-align:center;margin-top:12px">
             <button class="btn btn-ghost btn-sm" onclick="App.navigate('login')">لديك حساب؟ سجّل دخول</button>
           </div>
@@ -561,7 +777,7 @@ const App = {
             <div class="text-sm" style="color:var(--error-dark);margin-bottom:12px">
               دفع هؤلاء المتبرعون الشهر الماضي وتجاوزوا فترة السماح (اليوم الخامس) دون الدفع لهذا الشهر.
             </div>
-            <button class="btn w-full btn-sm" style="background:white;color:var(--error);border:1px solid var(--error);padding:6px;font-size:.8rem;font-weight:700" onclick="App.navigate('grid')">
+            <button class="btn w-full btn-sm" style="background:var(--surface);color:var(--error);border:1px solid var(--error);padding:6px;font-size:.8rem;font-weight:700" onclick="App._gridFilterStatus='unpaid'; App.navigate('grid')">
               مراجعة جدول المتبرعين للاتصال بهم
             </button>
           </div>
@@ -664,9 +880,9 @@ const App = {
       return `
         <div class="card card-hover" style="margin-bottom:12px;cursor:pointer;border-right:4px solid var(--primary);position:relative"
              onclick="App.superAdminViewGroup('${g.id}')">
-          <button title="إعدادات الحملة"
+          <button class="icon-btn" title="إعدادات الحملة" aria-label="إعدادات الحملة: ${this.esc(g.name)}"
                   onclick="event.stopPropagation(); App.showCampaignSettingsModal('${g.id}')"
-                  style="position:absolute;top:8px;left:8px;background:transparent;border:none;cursor:pointer;opacity:.35;padding:4px;color:var(--text-muted);width:28px;height:28px;display:flex;align-items:center;justify-content:center">
+                  style="position:absolute;top:6px;left:6px">
             ${Icons.settings}
           </button>
           <div class="flex-between" style="margin-bottom:10px">
@@ -699,19 +915,19 @@ const App = {
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
           <div class="stat-card fade-up delay-1">
-            <span class="icon" style="color:var(--primary)">${Icons.shield}</span>
-            <div class="stat-card-value">${this.fmt(groups.length)}</div>
-            <div class="stat-card-label">مجموعات نشطة</div>
+            <div class="stat-icon">${Icons.shield}</div>
+            <span class="stat-value">${this.fmt(groups.length)}</span>
+            <span class="stat-label">حملات نشطة</span>
           </div>
           <div class="stat-card fade-up delay-2">
-            <span class="icon" style="color:var(--success)">${Icons.users}</span>
-            <div class="stat-card-value">${this.fmt(totalPaid)} / ${this.fmt(totalDonors)}</div>
-            <div class="stat-card-label">متبرع دفع هذا الشهر</div>
+            <div class="stat-icon">${Icons.users}</div>
+            <span class="stat-value">${this.fmt(totalPaid)}<span class="unit">من ${this.fmt(totalDonors)}</span></span>
+            <span class="stat-label">متبرع دفع هذا الشهر</span>
           </div>
-          <div class="stat-card fade-up delay-3" style="grid-column:1 / -1;background:var(--hero-bg);color:white;border:none">
-            <span class="icon" style="color:var(--gold)">${Icons.star}</span>
-            <div class="stat-card-value" style="color:white">${this.fmt(totalAmount)} د.ع</div>
-            <div class="stat-card-label" style="color:rgba(255,255,255,.8)">مجموع التبرعات (${DB.getMonthLabel(curMonth)})</div>
+          <div class="stat-card accent-gold fade-up delay-3" style="grid-column:1 / -1">
+            <div class="stat-icon">${Icons.wallet}</div>
+            <span class="stat-value">${this.fmt(totalAmount)}<span class="unit">د.ع</span></span>
+            <span class="stat-label">مجموع التبرعات — ${DB.getMonthLabel(curMonth)}</span>
           </div>
         </div>
 
@@ -787,14 +1003,15 @@ const App = {
       let payAction = '';
       if (!isPaidThisMonth) {
         payAction = `
-          <div style="margin-top:6px">
-            <button class="btn btn-ghost btn-xs" style="color:var(--primary);padding:2px 8px;font-size:0.7rem;border:1px solid var(--primary-bg);height:22px;display:inline-flex;align-items:center;gap:4px" onclick="App.showPayWindow('${d.id}')">
+          <div>
+            <button class="btn btn-ghost btn-xs pay-link" onclick="App.showPayWindow('${d.id}')">
               ${Icons.wallet} طريقة السداد
             </button>
           </div>`;
       }
 
-      const cells = months.map(m => {
+      const cells = months.map((m, mi) => {
+        const cur = mi === 0 ? 'is-current' : '';
         const s = DB.getDonationStatus(group.id, m, d.id);
         const paid = s?.paid;
         const cellHtml = paid
@@ -805,11 +1022,13 @@ const App = {
         const titleName = (canEdit) ? d.name : displayName;
 
         return canEdit
-          ? `<td class="cell-action" onclick="App.toggleDonation('${group.id}','${m}','${d.id}',${d.amount||5000})" title="${paid?'إلغاء':'تأكيد تبرع'} ${this.esc(titleName)}">${cellHtml}</td>`
-          : `<td>${cellHtml}</td>`;
+          ? `<td class="cell-action ${cur}" onclick="App.toggleDonation('${group.id}','${m}','${d.id}',${d.amount||5000})" title="${paid?'إلغاء':'تأكيد تبرع'} ${this.esc(titleName)}" aria-label="${paid?'إلغاء تبرع':'تأكيد تبرع'} ${this.esc(titleName)} — ${DB.getMonthLabel(m)}">${cellHtml}</td>`
+          : `<td class="${cur}">${cellHtml}</td>`;
       }).join('');
 
-      return `<tr><td><div style="font-weight:600">${this.esc(displayName)}</div>${colBadge}${payAction}<div class="text-xs text-muted" style="margin-top:2px">${this.fmt(d.amount||5000)} د.ع</div></td>${cells}</tr>`;
+      const isSelf = user.role === 'donor' && d.id === user.id;
+      const nameShown = isSelf ? d.name : displayName;
+      return `<tr class="${isSelf ? 'row-self' : ''}"><td><div class="donor-cell-name">${this.esc(nameShown)}${isSelf ? '<span class="self-badge">أنت</span>' : ''}</div>${colBadge}${payAction}<div class="text-xs text-muted donor-cell-amount" style="margin-top:2px">${this.fmt(d.amount||5000)} د.ع</div></td>${cells}</tr>`;
     }).join('');
 
     let headerControls = '';
@@ -851,7 +1070,7 @@ const App = {
         ${headerControls}
 
         <div class="month-pills" style="margin-bottom:16px">
-          ${months.map((m,i)=>`<button class="month-pill ${i===0?'active':''}">${DB.getMonthLabel(m)}</button>`).join('')}
+          ${months.map((m,i)=>`<button class="month-pill ${i===0?'active':''}" onclick="App._focusMonth(${i})">${DB.getMonthLabel(m)}</button>`).join('')}
         </div>
 
         ${canEdit?`<div style="background:var(--primary-bg);border-radius:var(--r-md);padding:12px 16px;margin-bottom:16px;font-size:.875rem;color:var(--primary-dark)">اضغط على أي خلية لتغيير حالة التبرع</div>`:''}
@@ -860,7 +1079,8 @@ const App = {
           <table class="donation-grid">
             <thead><tr>
               <th>المتبرع</th>
-              ${months.map(m=>`<th>${DB.getMonthLabel(m)}</th>`).join('')}
+              ${months.map((m,i)=>{ const [monthName, year] = DB.getMonthLabel(m).split(' ');
+                return `<th class="${i===0?'is-current':''}" data-month="${i}" scope="col"><span class="mh-month">${monthName}</span><span class="mh-year">${year}</span></th>`; }).join('')}
             </tr></thead>
             <tbody>${rows || `<tr><td colspan="${months.length+1}" style="text-align:center;padding:40px;color:var(--text-muted)">لا يوجد متبرعون</td></tr>`}</tbody>
           </table>
@@ -926,28 +1146,46 @@ const App = {
   },
 
   toggleDonation(groupId, monthKey, userId, amount) {
-    const cur  = DB.getDonationStatus(groupId, monthKey, userId);
-    const paid = cur?.paid;
+    const prev = DB.getDonationStatus(groupId, monthKey, userId);
+    const paid = prev?.paid;
     DB.setDonationStatus(groupId, monthKey, userId, {
       paid: !paid, amount: !paid ? amount : 0,
       collectorId: Auth.currentUser()?.id,
     });
-    this.toast(paid ? 'تم إلغاء التبرع' : 'تم تأكيد التبرع');
 
-    // Feature: Send Digital Receipt via Bot
+    // Digital receipt via the bot — sent only after the undo window closes,
+    // so an accidental tap that is undone never messages the donor.
+    let receiptTimer = null;
     if (!paid) {
       const donor = DB.getUser(userId);
       if (donor && donor.telegramChatId) {
-        const group = DB.getGroup(groupId);
-        API.post('/api/send-receipt', {
-          chatId: donor.telegramChatId,
-          donorName: donor.name,
-          amount: amount || 5000,
-          month: DB.getMonthLabel(monthKey),
-          collectorName: Auth.currentUser().name,
-        }).catch(e => console.log('Receipt skipped:', e));
+        const collectorName = Auth.currentUser()?.name;
+        receiptTimer = setTimeout(() => {
+          API.post('/api/send-receipt', {
+            chatId: donor.telegramChatId,
+            donorName: donor.name,
+            amount: amount || 5000,
+            month: DB.getMonthLabel(monthKey),
+            collectorName,
+          }).catch(e => console.log('Receipt skipped:', e));
+        }, 5500);
       }
     }
+
+    this.toast(paid ? 'تم إلغاء التبرع' : 'تم تأكيد التبرع', 'success', {
+      duration: 5000,
+      action: {
+        label: 'تراجع',
+        onClick: () => {
+          clearTimeout(receiptTimer);
+          DB.setDonationStatus(groupId, monthKey, userId, prev
+            ? { paid: prev.paid, amount: prev.amount, date: prev.date, collectorId: prev.collectorId }
+            : { paid: false, amount: 0, collectorId: null });
+          if (this.currentView === 'grid') this.renderGrid();
+          this.toast('تم التراجع', 'info');
+        },
+      },
+    });
 
     this.renderGrid();
   },
@@ -982,7 +1220,7 @@ const App = {
       </div>
       <div class="form-group">
         <label class="form-label">مبلغ التبرع الشهري (د.ع)</label>
-        <input type="number" id="add-amount" class="form-input" value="5000" min="1000" step="1000" dir="ltr" style="text-align:center">
+        <input type="number" inputmode="numeric" id="add-amount" class="form-input" value="5000" min="1000" step="1000" dir="ltr" style="text-align:center">
       </div>
       <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;margin-bottom:12px;background:var(--primary-bg);padding:10px;border-radius:var(--r-md)">
         <div>
@@ -1096,7 +1334,7 @@ const App = {
       </div>
       <div class="form-group">
         <label class="form-label">المبلغ المستلم (د.ع)</label>
-        <input type="number" id="prd-amount" class="form-input" value="5000" min="250" step="250" dir="ltr" style="text-align:center">
+        <input type="number" inputmode="numeric" id="prd-amount" class="form-input" value="5000" min="250" step="250" dir="ltr" style="text-align:center">
       </div>
       <div class="form-group">
         <label class="form-label">ملاحظة (اختياري)</label>
@@ -1218,10 +1456,10 @@ const App = {
           <span class="badge ${typeBadge}">${typeLabel}</span>
           ${canDelete ? `
             <div style="display:flex;gap:4px">
-              <button onclick="event.stopPropagation(); App.showEditAnnouncementModal('${a.id}')" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:4px">
+              <button class="icon-btn primary" title="تعديل" aria-label="تعديل الإعلان" onclick="event.stopPropagation(); App.showEditAnnouncementModal('${a.id}')">
                 ${Icons.edit}
               </button>
-              <button onclick="event.stopPropagation(); App.deleteAnnouncement('${a.id}')" style="background:none;border:none;color:var(--error);cursor:pointer;padding:4px">
+              <button class="icon-btn danger" title="حذف" aria-label="حذف الإعلان" onclick="event.stopPropagation(); App.deleteAnnouncement('${a.id}')">
                 ${Icons.trash}
               </button>
             </div>` : ''}
@@ -1904,6 +2142,13 @@ const App = {
         <button class="btn btn-danger w-full fade-up delay-4" onclick="App.handleLogout()">
           <span class="icon icon-sm icon-white">${Icons.logout}</span> تسجيل الخروج
         </button>
+        ${user.role !== 'superadmin' ? `
+        <button class="btn btn-ghost w-full fade-up delay-4" style="margin-top:8px;color:var(--danger)" onclick="App.showDeleteAccountModal()">
+          حذف حسابي
+        </button>` : ''}
+        <p class="text-center text-xs fade-up delay-4" style="margin:12px 0 4px">
+          <a href="/privacy.html" target="_blank" rel="noopener">سياسة الخصوصية</a>
+        </p>
       </div>`;
   },
 
@@ -1995,40 +2240,40 @@ const App = {
             <div class="empty-title">لا يوجد أيتام</div>
           </div>
         ` : orphans.map((o, i) => `
-          <div class="card fade-up delay-${Math.min(i, 5)}" style="margin-bottom:16px;background:#f9fbfc;border:1px solid #ebf1f5;border-radius:12px;display:flex;padding:0;overflow:hidden">
+          <div class="card fade-up delay-${Math.min(i, 5)}" style="margin-bottom:16px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;display:flex;padding:0;overflow:hidden">
             <!-- Right side (Avatar + Name) -->
-            <div style="flex:0 0 120px;padding:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:1px solid #ebf1f5">
-              <div style="width:70px;height:70px;background:#2b9eb3;border-radius:16px;display:flex;align-items:center;justify-content:center;color:white;margin-bottom:12px">
+            <div style="flex:0 0 120px;padding:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-left:1px solid var(--border)">
+              <div style="width:70px;height:70px;background:var(--primary);border-radius:16px;display:flex;align-items:center;justify-content:center;color:white;margin-bottom:12px">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
               </div>
-              <div style="font-weight:700;color:#2b9eb3;font-size:.85rem;text-align:center;line-height:1.4">${this.esc(o.name)}</div>
+              <div style="font-weight:700;color:var(--primary);font-size:.85rem;text-align:center;line-height:1.4">${this.esc(o.name)}</div>
               <div style="font-size:.75rem;color:var(--text-muted);margin-top:4px">${o.birthDate ? o.birthDate.replace(/-/g,'/') : ''}</div>
             </div>
             <!-- Left side (Details Grid) -->
             <div style="flex:1;padding:16px 12px;display:flex;flex-direction:column;justify-content:center;gap:8px">
-              <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
+              <div style="display:flex;justify-content:flex-start;font-size:.85rem;border-bottom:1px solid var(--border);padding-bottom:4px">
                 <span style="font-weight:700;color:var(--text-heading)">الرمز : ${this.esc(o.code)}</span>
               </div>
-              <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
+              <div style="display:flex;justify-content:flex-start;font-size:.85rem;border-bottom:1px solid var(--border);padding-bottom:4px">
                 <span style="font-weight:700;color:var(--text-muted)">المحافظة : ${this.esc(o.province)}</span>
               </div>
-              <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
+              <div style="display:flex;justify-content:flex-start;font-size:.85rem;border-bottom:1px solid var(--border);padding-bottom:4px">
                 <span style="font-weight:700;color:var(--text-muted)">نوع الكفالة : ${this.esc(o.type)}</span>
               </div>
-              <div style="display:flex;justify-content:flex-end;font-size:.85rem;border-bottom:1px solid #ebf1f5;padding-bottom:4px">
-                <span style="font-weight:700;color:var(--text-heading)">مبلغ الكفالة : <span style="color:#2b9eb3">${this.fmt(o.amount)}</span></span>
+              <div style="display:flex;justify-content:flex-start;font-size:.85rem;border-bottom:1px solid var(--border);padding-bottom:4px">
+                <span style="font-weight:700;color:var(--text-heading)">مبلغ الكفالة : <span style="color:var(--primary)">${this.fmt(o.amount)}</span></span>
               </div>
-              <div style="display:flex;justify-content:flex-end;font-size:.85rem;color:var(--text-heading);font-weight:700;align-items:center;gap:4px">
+              <div style="display:flex;justify-content:flex-start;font-size:.85rem;color:var(--text-heading);font-weight:700;align-items:center;gap:4px">
                 <span>تبقى على عيد الميلاد : ${getDaysTillBirthday(o.birthDate)} يوم</span>
                 <span style="color:var(--gold)">${Icons.clock}</span>
               </div>
             </div>
             ${canManage ? `
             <div style="position:absolute;top:8px;left:8px;display:flex;gap:4px">
-              <button onclick="event.stopPropagation(); App.showEditOrphanModal('${o.id}')" style="background:none;border:none;color:var(--primary);cursor:pointer;padding:4px">
+              <button class="icon-btn primary" title="تعديل" aria-label="تعديل بيانات ${this.esc(o.name)}" onclick="event.stopPropagation(); App.showEditOrphanModal('${o.id}')">
                 ${Icons.edit}
               </button>
-              <button onclick="event.stopPropagation(); App.deleteOrphan('${o.id}')" style="background:none;border:none;color:var(--error);cursor:pointer;padding:4px">
+              <button class="icon-btn danger" title="حذف" aria-label="حذف ${this.esc(o.name)}" onclick="event.stopPropagation(); App.deleteOrphan('${o.id}')">
                 ${Icons.trash}
               </button>
             </div>` : ''}
@@ -2059,7 +2304,7 @@ const App = {
       </div>
       <div class="form-group">
         <label class="form-label">مبلغ الكفالة (د.ع)</label>
-        <input type="number" id="orph-amount" class="form-input" value="95000" dir="ltr" style="text-align:center">
+        <input type="number" inputmode="numeric" id="orph-amount" class="form-input" value="95000" dir="ltr" style="text-align:center">
       </div>
       <div class="form-group">
         <label class="form-label">تاريخ الميلاد</label>
@@ -2113,7 +2358,7 @@ const App = {
       </div>
       <div class="form-group">
         <label class="form-label">مبلغ الكفالة (د.ع)</label>
-        <input type="number" id="edit-orph-amount" class="form-input" value="${o.amount||95000}" dir="ltr" style="text-align:center">
+        <input type="number" inputmode="numeric" id="edit-orph-amount" class="form-input" value="${o.amount||95000}" dir="ltr" style="text-align:center">
       </div>
       <div class="form-group">
         <label class="form-label">تاريخ الميلاد</label>
@@ -2394,10 +2639,70 @@ const App = {
     }
   },
 
+  // A user deletes their own account (store requirement). Staff confirm with their PIN.
+  showDeleteAccountModal() {
+    const user = Auth.currentUser();
+    if (!user) return;
+    const needsPin = user.role !== 'donor';
+    this._openModal(`
+      <div class="modal-header"><div class="modal-title" style="color:var(--danger)">حذف حسابي</div></div>
+      <p class="text-sm" style="line-height:1.9;margin-bottom:14px">
+        سيتم مسح اسمك ورقم هاتفك وربط تليجرام وإنهاء جميع جلساتك. تبقى سجلات التبرعات السابقة
+        بدون بيانات تعريفية لأنها جزء من حسابات الحملة. <strong>لا يمكن التراجع عن هذا الإجراء.</strong>
+      </p>
+      ${needsPin ? `
+      <div class="form-group">
+        <label class="form-label" for="del-acc-pin">رمز الدخول للتأكيد</label>
+        <input type="password" id="del-acc-pin" class="form-input" maxlength="20" autocomplete="current-password" dir="ltr" style="text-align:center">
+      </div>` : `
+      <div class="form-group">
+        <label class="form-label" for="del-acc-confirm">اكتب كلمة «حذف» للتأكيد</label>
+        <input type="text" id="del-acc-confirm" class="form-input" autocomplete="off" style="text-align:center">
+      </div>`}
+      <button class="btn btn-danger w-full" data-primary onclick="App.submitDeleteAccount()">حذف حسابي نهائياً</button>
+      <button class="btn btn-ghost w-full" style="margin-top:8px" onclick="App.closeModal()">إلغاء</button>
+      <p class="text-center text-xs" style="margin-top:10px"><a href="/privacy.html#delete" target="_blank" rel="noopener">ماذا يُحذف بالضبط؟</a></p>`);
+  },
+
+  async submitDeleteAccount() {
+    const user = Auth.currentUser();
+    if (!user) return;
+    const pin  = document.getElementById('del-acc-pin')?.value.trim();
+    const word = document.getElementById('del-acc-confirm')?.value.trim();
+    if (user.role !== 'donor' && !pin) return this.toast('أدخل رمز الدخول للتأكيد', 'error');
+    if (user.role === 'donor' && word !== 'حذف') return this.toast('اكتب كلمة «حذف» للتأكيد', 'error');
+    try {
+      await API.req('DELETE', '/api/auth/me', pin ? { confirm: 'DELETE', pin } : { confirm: 'DELETE' });
+      SyncQueue.clear();
+      DB.logout();
+      this.closeModal();
+      this.navigate('landing');
+      this.toast('تم حذف حسابك', 'info');
+    } catch (e) {
+      this.toast(e.message || 'تعذر حذف الحساب', 'error');
+    }
+  },
+
   async handleLogout() {
-    await Auth.logout();
-    this.toast('تم تسجيل الخروج');
-    this.navigate('landing');
+    if (this._loggingOut) return;
+    let pending = SyncQueue.pendingCount();
+    const ask = pending
+      ? `لديك ${pending} تغيير لم يُحفظ على الخادم بعد. سنحاول حفظه الآن ثم تسجيل الخروج. متابعة؟`
+      : 'تسجيل الخروج من حسابك؟';
+    if (!confirm(ask)) return;
+    this._loggingOut = true;
+    try {
+      if (pending) {
+        await Promise.race([SyncQueue.flushNow(), new Promise(r => setTimeout(r, 5000))]);
+        pending = SyncQueue.pendingCount();
+        if (pending && !confirm(`تعذر حفظ ${pending} تغيير (لا يوجد اتصال). الخروج الآن سيحذفها من هذا الجهاز. هل تريد الخروج؟`)) return;
+      }
+      await Auth.logout();
+      this.toast('تم تسجيل الخروج');
+      this.navigate('landing');
+    } finally {
+      this._loggingOut = false;
+    }
   },
 
   // ─────────────────────────────────────────────────────────────
@@ -2667,11 +2972,11 @@ const App = {
         <div style="display:flex;gap:12px">
           <div class="form-group" style="flex:1">
             <label class="form-label">الأيتام المكفولين</label>
-            <input type="number" id="new-camp-orphans" class="form-input" value="1" min="1" dir="ltr" style="text-align:center">
+            <input type="number" inputmode="numeric" id="new-camp-orphans" class="form-input" value="1" min="1" dir="ltr" style="text-align:center">
           </div>
           <div class="form-group" style="flex:1">
             <label class="form-label">كلفة اليتيم (د.ع)</label>
-            <input type="number" id="new-camp-cost" class="form-input" value="25000" min="5000" step="5000" dir="ltr" style="text-align:center">
+            <input type="number" inputmode="numeric" id="new-camp-cost" class="form-input" value="25000" min="5000" step="5000" dir="ltr" style="text-align:center">
           </div>
         </div>
         

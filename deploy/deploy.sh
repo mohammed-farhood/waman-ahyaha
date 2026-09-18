@@ -18,7 +18,7 @@ fi
 echo "=== [1/4] Frontend ==="
 ssh "$HOST" "mkdir -p $APP/frontend/css $APP/frontend/js $APP/frontend/icons $APP/backend $APP/deploy"
 rsync -az \
-  index.html favicon.svg logo.png manifest.json "$HOST:$APP/frontend/"
+  index.html privacy.html favicon.svg logo.png manifest.json "$HOST:$APP/frontend/"
 rsync -az --delete css/ "$HOST:$APP/frontend/css/"
 rsync -az --delete icons/ "$HOST:$APP/frontend/icons/"
 rsync -az --delete --exclude=vendor/ js/ "$HOST:$APP/frontend/js/"

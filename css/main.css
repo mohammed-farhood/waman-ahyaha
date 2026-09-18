@@ -1201,3 +1201,184 @@ body[dir="ltr"] .toast { border-right: none; border-left: 4px solid var(--primar
 .tg-howto summary { cursor: pointer; font-weight: 700; color: var(--primary); }
 .tg-howto ol { margin: 10px 18px 2px; padding: 0; line-height: 1.9; color: var(--text-body); }
 .tg-howto code { background: var(--gray-50); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: .8rem; }
+
+/* ============================================================
+   POLISH PASS — readability, dark mode, touch, feedback
+   ============================================================ */
+
+/* Tokens the app already used but never defined; dark-mode greys and badges */
+:root {
+  --warning-dark: #B45309;
+  --error-dark:   #B91C1C;
+  --danger-dark:  #B91C1C;
+  --success-dark: #15803D;
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --gray-50:  #1B2536;
+  --gray-100: #243044;
+  --gray-200: #334155;
+  --gray-300: #475569;
+  --gray-400: #64748B;
+  --gold-dark:    #E8CA50;
+  --warning-dark: #FBBF24;
+  --error-dark:   #F87171;
+  --danger-dark:  #F87171;
+  --success-dark: #4ADE80;
+  --info-bg:  rgba(37,99,235,.15);
+  --error-bg: rgba(220,38,38,.15);
+}
+[data-theme="dark"] .badge-primary { color: var(--primary-light); }
+[data-theme="dark"] .badge-success { color: #4ADE80; }
+[data-theme="dark"] .badge-danger  { color: #F87171; }
+[data-theme="dark"] .badge-warning { color: #FBBF24; }
+[data-theme="dark"] .badge-gray    { color: var(--text-muted); }
+
+/* Notch / home-indicator safe areas (installed app on iPhone) */
+.top-nav {
+  height: calc(var(--nav-h) + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+  padding-left: max(var(--sp-5), env(safe-area-inset-left));
+  padding-right: max(var(--sp-5), env(safe-area-inset-right));
+}
+.main-content {
+  padding-top: calc(var(--nav-h) + env(safe-area-inset-top) + var(--sp-6));
+  padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom) + var(--sp-8));
+}
+.bottom-nav { height: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom)); }
+.toast-container { top: calc(var(--nav-h) + env(safe-area-inset-top) + var(--sp-4)); }
+.modal {
+  max-height: 92dvh;
+  padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+@media (min-width: 640px) { .modal { max-height: 85dvh; } }
+
+/* A closing modal must not catch taps (it stays in the DOM while fading out) */
+.modal-overlay:not(.active) { pointer-events: none; }
+body.modal-open { overflow: hidden; }
+
+/* Busy / disabled buttons */
+.btn:disabled, .btn[aria-busy="true"] {
+  opacity: .6; cursor: not-allowed; pointer-events: none;
+  transform: none !important; box-shadow: none !important;
+}
+.btn-spinner {
+  width: 16px; height: 16px; flex-shrink: 0; display: inline-block;
+  border: 2px solid currentColor; border-inline-end-color: transparent;
+  border-radius: 50%; animation: spin .7s linear infinite;
+}
+
+/* Touch screens: no "stuck" hover states after a tap */
+html { -webkit-tap-highlight-color: transparent; }
+@media (hover: none) {
+  .btn::after { display: none; }
+  .btn-primary:hover { background: var(--primary); border-color: var(--primary); box-shadow: var(--shadow-primary); transform: none; }
+  .btn-gold:hover { background: var(--gold); border-color: var(--gold); transform: none; }
+  .btn-outline:hover { background: transparent; color: var(--primary); }
+  .btn-outline-gold:hover { background: transparent; color: var(--gold-dark); }
+  .btn-ghost:hover { background: transparent; color: var(--text-muted); }
+  .card-hover:hover { box-shadow: none; transform: none; }
+}
+
+/* Keyboard focus that is actually visible */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.form-input:focus-visible { outline: none; }
+
+/* iPhone zooms into any field under 16px */
+@media (max-width: 767px) {
+  .form-input, .form-select, textarea.form-input { font-size: 16px; }
+}
+
+/* Stat tiles: big totals shrink instead of being cut off */
+.stat-card .stat-value { font-size: clamp(1.35rem, 6.5vw, 2rem); overflow-wrap: anywhere; }
+.stat-card .stat-value .unit { font-size: .55em; font-weight: 700; margin-inline-start: 2px; }
+
+/* Round 40px icon buttons (edit / delete / settings) */
+.icon-btn {
+  width: 40px; height: 40px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%; background: transparent; cursor: pointer;
+  color: var(--text-muted); transition: background var(--t-fast), color var(--t-fast);
+}
+.icon-btn:hover { background: var(--gray-100); color: var(--text-body); }
+.icon-btn.primary { color: var(--primary); }
+.icon-btn.danger  { color: var(--danger); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* Donations grid readability */
+.donation-grid th .mh-month { display: block; font-weight: 800; font-size: .8125rem; }
+.donation-grid th .mh-year  { display: block; font-size: .65rem; font-weight: 600; opacity: .75; }
+.donation-grid th.is-current { background: var(--primary-dark); }
+.donation-grid td.is-current { box-shadow: inset 0 0 0 999px rgba(42,143,160,.07); }
+.donation-grid tbody tr:nth-child(even) td { background: var(--surface-2); }
+.donation-grid tr.row-self td { background: var(--gold-bg) !important; }
+.donation-grid .col-flash { animation: colFlash 1.2s ease; }
+@keyframes colFlash { 0%, 60% { box-shadow: inset 0 0 0 999px rgba(200,169,42,.25); } }
+.check-icon.unpaid { color: var(--gray-400); }
+.donor-cell-name { font-weight: 700; color: var(--text-heading); line-height: 1.4; }
+.donor-cell-amount { white-space: nowrap; }
+.self-badge {
+  display: inline-block; margin-inline-start: 6px; padding: 0 8px; border-radius: 999px;
+  background: var(--gold); color: var(--text-on-gold); font-size: .65rem; font-weight: 800; vertical-align: middle;
+}
+.pay-link {
+  margin-top: 6px; min-height: 28px; padding: 2px 10px; font-size: .72rem;
+  color: var(--primary); border: 1px solid var(--primary-bg); gap: 4px;
+}
+.month-pill { cursor: pointer; }
+@media (max-width: 480px) {
+  .donation-grid td:first-child { min-width: 118px; max-width: 150px; white-space: normal; }
+}
+
+/* Loading skeletons (first screen while the session loads) */
+.skeleton { position: relative; overflow: hidden; background: var(--gray-100); border-radius: var(--r-md); }
+.skeleton::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+  animation: shimmer 1.3s infinite;
+}
+[data-theme="dark"] .skeleton::after { background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent); }
+@keyframes shimmer { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
+.sk-hero  { height: 120px; margin-bottom: 16px; border-radius: var(--r-lg); }
+.sk-stat  { height: 96px; border-radius: var(--r-lg); }
+.sk-line  { height: 14px; margin-bottom: 10px; }
+.sk-card  { height: 72px; margin-bottom: 12px; border-radius: var(--r-lg); }
+
+/* Toasts: types, action button, tap to dismiss */
+.toast { cursor: pointer; animation: toastIn .3s ease, toastOut .3s ease calc(var(--toast-life, 3200ms) - 300ms) forwards; }
+.toast-info { border-color: var(--primary); }
+.toast-action {
+  margin-inline-start: auto; flex-shrink: 0; background: none; border: none; cursor: pointer;
+  font: inherit; font-weight: 800; color: var(--primary); padding: 6px 10px; border-radius: var(--r-sm);
+}
+.toast-action:hover { background: var(--primary-bg); }
+
+/* Offline / pending-sync pill in the top bar */
+.sync-pill {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 700;
+  background: var(--warning-bg); color: var(--warning-dark);
+}
+.sync-pill.offline { background: var(--danger-bg); color: var(--danger-dark); }
+.sync-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.is-spinning svg { animation: spin .8s linear infinite; }
+
+/* Tablets / laptops: keep the navigation bar (it used to vanish at 768px) */
+@media (min-width: 768px) {
+  .bottom-nav {
+    display: flex; left: 50%; right: auto; width: min(640px, 100%);
+    transform: translateX(-50%);
+    border: 1px solid var(--border); border-bottom: none;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+  }
+}
+
+/* Respect "reduce motion" */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important; scroll-behavior: auto !important;
+  }
+}
