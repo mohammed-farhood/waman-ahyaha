@@ -466,13 +466,14 @@ const App = {
           </div>
           <h1>متابعة التبرعات الشهرية<br>لكفالة الأيتام</h1>
           <p>منصة شفافة تُمكّن المجموعات الجامعية من متابعة تبرعاتها وتحفيز المنافسة الإيجابية</p>
-          <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
-            <button class="btn btn-gold btn-xl" onclick="App.navigate('login')">تسجيل الدخول</button>
-            <button class="btn btn-outline btn-xl" style="border-color:rgba(255,255,255,.5);color:white" onclick="App.navigate('register')">انضم كمتبرع</button>
-          </div>
-          <div style="margin-top:20px">
-            <button class="btn btn-lg" style="background:rgba(255,255,255,.15);color:white;border:1px solid rgba(255,255,255,.3)" onclick="App.navigate('newcampaign')">
-              🌟 هل تريد تأسيس حملة جديدة؟ ابدأ من هنا
+          <div class="hero-actions">
+            <div class="hero-actions-main">
+              <button class="btn btn-gold btn-xl" onclick="App.navigate('login')">تسجيل الدخول</button>
+              <button class="btn btn-outline btn-xl" style="border-color:rgba(255,255,255,.5);color:white" onclick="App.navigate('register')">انضم كمتبرع</button>
+            </div>
+            <button class="btn btn-lg hero-cta-campaign" onclick="App.navigate('newcampaign')">
+              <span class="icon icon-sm">${Icons.plus}</span>
+              هل تريد تأسيس حملة جديدة؟ ابدأ من هنا
             </button>
           </div>
           <div class="hero-stats">
@@ -2713,7 +2714,7 @@ const App = {
     view.innerHTML = `
       <div class="container">
         <div class="card fade-up" style="margin-bottom:20px;background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);border:none;color:white;text-align:center;padding:32px 24px">
-          <div style="color:var(--gold); display:flex; justify-content:center; margin-bottom:12px; transform:scale(2);">${Icons.star}</div>
+          <div class="nc-hero-icon">${Icons.star}</div>
           <h2 style="color:white;margin-bottom:8px">ابدأ حملتك على منصة ومن أحياها</h2>
           <p style="color:rgba(255,255,255,.85);font-size:.95rem;margin:0">نرحب بكل من يريد إطلاق حملة تبرعات جديدة. نحن هنا لمساعدتك!</p>
         </div>

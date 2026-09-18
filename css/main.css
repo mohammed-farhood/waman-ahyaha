@@ -599,14 +599,14 @@ body[dir="ltr"] .toggle input:checked + .toggle-slider::before { transform: tran
 }
 
 /* ============================================================
-   HERO SECTION — dark teal like waman-ahyaha
+   HERO SECTION — dark teal
    ============================================================ */
 .hero {
   background: linear-gradient(145deg, var(--hero-bg) 0%, var(--hero-bg-dark) 100%);
   color: white;
   text-align: center;
   padding: var(--sp-20) var(--sp-5) var(--sp-16);
-  margin: calc(-1 * var(--sp-6)) calc(-1 * var(--sp-5)) var(--sp-8);
+  margin: calc(-1 * var(--sp-6)) 0 var(--sp-8); /* full-bleed: its parent has no side padding */
   position: relative;
   overflow: hidden;
 }
@@ -629,6 +629,17 @@ body[dir="ltr"] .toggle input:checked + .toggle-slider::before { transform: tran
 .hero-content { position: relative; z-index: 1; }
 .hero h1 { color: white; font-size: 2rem; margin-bottom: var(--sp-3); }
 .hero p { color: rgba(255,255,255,.85); font-size: 1.0625rem; max-width: 560px; margin: 0 auto var(--sp-8); }
+
+.hero-actions { max-width: 440px; margin: 0 auto; display: grid; gap: 12px; }
+.hero-actions-main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hero-actions .btn-xl { padding-inline: 12px; min-width: 0; }
+.hero-cta-campaign {
+  width: 100%; white-space: normal; padding-inline: 16px; font-size: .9375rem;
+  background: rgba(255,255,255,.12); color: white; border: 1px solid rgba(255,255,255,.3);
+}
+.hero-cta-campaign:hover { background: rgba(255,255,255,.2); color: white; }
+.nc-hero-icon { color: var(--gold); display: flex; justify-content: center; margin-bottom: 12px; }
+.nc-hero-icon svg { width: 40px; height: 40px; }
 
 .hero-stats {
   display: flex;
