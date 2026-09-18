@@ -10,16 +10,16 @@
 const DB = {
   KEYS: {
     APP_VERSION: '4.0.0',
-    USERS: 'alayn_users',
-    GROUPS: 'alayn_groups',
-    DONATIONS: 'alayn_donations',
-    ANNOUNCEMENTS: 'alayn_announcements',
-    ORPHANS: 'alayn_orphans',
-    CURRENT_USER: 'alayn_current_user',
-    SETTINGS: 'alayn_settings',
-    CAMPAIGN_REQUESTS: 'alayn_campaign_requests',
-    SUPPORT_MESSAGES: 'alayn_support_messages',
-    PAY_REPORTS: 'alayn_pay_reports',
+    USERS: 'waman_users',
+    GROUPS: 'waman_groups',
+    DONATIONS: 'waman_donations',
+    ANNOUNCEMENTS: 'waman_announcements',
+    ORPHANS: 'waman_orphans',
+    CURRENT_USER: 'waman_current_user',
+    SETTINGS: 'waman_settings',
+    CAMPAIGN_REQUESTS: 'waman_campaign_requests',
+    SUPPORT_MESSAGES: 'waman_support_messages',
+    PAY_REPORTS: 'waman_pay_reports',
   },
 
   // ── Cache primitives ───────────────────────────────────

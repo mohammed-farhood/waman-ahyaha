@@ -5,7 +5,8 @@ const jwt       = require('jsonwebtoken');
 // user from a valid access cookie when there is one, otherwise on the client IP.
 // (Keying everyone on IP made a whole campus Wi-Fi share one budget.)
 function userOrIp(req) {
-  const t = req.cookies?.alayn_at;
+  const h = req.headers.authorization || '';
+  const t = req.cookies?.waman_at || (h.startsWith('Bearer ') ? h.slice(7).trim() : '');
   if (t) { try { return 'u:' + jwt.verify(t, process.env.JWT_SECRET).sub; } catch {} }
   return 'ip:' + req.ip;
 }

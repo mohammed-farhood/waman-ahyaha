@@ -1,7 +1,7 @@
 {
-  "name": "al-ayn-backend",
+  "name": "waman-ahyaha-backend",
   "version": "2.0.0",
-  "description": "AL-AYN Donation Tracker — Production Backend",
+  "description": "Waman Ahyaha Donation Tracker — Production Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

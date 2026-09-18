@@ -1,8 +1,16 @@
 const jwt = require('jsonwebtoken');
 
+// The web app authenticates with an httpOnly cookie; the mobile app sends
+// `Authorization: Bearer <access token>` and `X-Client: mobile`.
+function bearerToken(req) {
+  const h = req.headers.authorization || '';
+  return h.startsWith('Bearer ') ? h.slice(7).trim() : '';
+}
+function accessToken(req) { return req.cookies?.waman_at || bearerToken(req); }
+function isMobile(req) { return req.get('X-Client') === 'mobile'; }
+
 function authRequired(req, res, next) {
-  const token = req.cookies?.alayn_at
-    || (req.headers.authorization || '').replace('Bearer ', '');
+  const token = accessToken(req);
   if (!token) return res.status(401).json({ success: false, error: 'unauthenticated' });
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET);
@@ -56,4 +64,4 @@ function assertGroup(req, res, targetGroupId) {
   return false;
 }
 
-module.exports = { authRequired, roleRequired, sameGroupOr, selfOr, effectiveGroupId, assertGroup };
+module.exports = { authRequired, roleRequired, sameGroupOr, selfOr, effectiveGroupId, assertGroup, accessToken, bearerToken, isMobile };

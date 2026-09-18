@@ -1,5 +1,5 @@
 /**
- * qapture config — AL-AYN ("ومن أحياها") donation tracker
+ * qapture config — Waman Ahyaha ("ومن أحياها") donation tracker
  *
  * Tailored by hand from the repo's route/view map (js/app.js, js/auth.js,
  * js/data.js, index.html, backend/routes/*). Re-running `qapture init --force`
@@ -21,7 +21,7 @@
 // @ts-check
 /** @type {import('qapture').QaConfig} */
 const config = {
-  namespace: 'al-ayn',
+  namespace: 'waman-ahyaha',
   rtl: true,
 
   theme: {
@@ -207,8 +207,8 @@ const config = {
           path: '/institution',
           risk: 'amber',
           what: {
-            en: 'Visit the parent-NGO hub (حساب العين) and submit a support message',
-            ar: 'زيارة صفحة المؤسسة الأم (حساب العين) وإرسال رسالة دعم',
+            en: 'Visit the About page (عن المنصة) and submit a support message',
+            ar: 'زيارة صفحة عن المنصة وإرسال رسالة دعم',
           },
           riskWhy:
             "saveSupportMessage → POST /api/support-messages — rubric's 'support messages' bucket; recoverable inbound record",
@@ -495,7 +495,7 @@ const config = {
    * embedded in exports).
    */
   preamble: {
-    projectName: 'ومن أحياها — AL-AYN Donation Tracker',
+    projectName: 'ومن أحياها — Waman Ahyaha Donation Tracker',
     oneLiner:
       'A bilingual (Arabic/English), RTL-first donation-tracking PWA for charity donor groups: field collectors record monthly pledge payments, group admins and a cross-group superadmin manage groups/collectors/orphans, and donors track their own payment status.',
     stack:

@@ -1,7 +1,7 @@
 const express = require('express');
 const jwt     = require('jsonwebtoken');
 const pool    = require('../db/pool');
-const { roleRequired }               = require('../middleware/auth');
+const { roleRequired, accessToken }  = require('../middleware/auth');
 const { write: audit }               = require('../services/audit');
 const { body: validate }             = require('../middleware/validate');
 const { supportMsgLimiter }          = require('../middleware/rateLimit');
@@ -11,7 +11,7 @@ const router = express.Router();
 
 // The support form is also shown to visitors, so login is optional here.
 function optionalUser(req) {
-  const t = req.cookies?.alayn_at;
+  const t = accessToken(req);
   if (!t) return null;
   try { return jwt.verify(t, process.env.JWT_SECRET); } catch { return null; }
 }

@@ -43,7 +43,7 @@ router.post('/auth-code', telegramLimiter, async (req, res, next) => {
     let groupId = null;
     try {
       const jwt = require('jsonwebtoken');
-      const t = req.cookies?.alayn_at || (req.headers.authorization||'').replace('Bearer ','');
+      const t = req.cookies?.waman_at || (req.headers.authorization||'').replace('Bearer ','');
       if (t) { const u = jwt.verify(t, process.env.JWT_SECRET); groupId = u.groupId || null; }
     } catch {}
 

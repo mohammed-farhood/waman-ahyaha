@@ -1,4 +1,4 @@
--- AL-AYN Production Schema
+-- Waman Ahyaha Production Schema
 -- Migration 0001: Initial tables
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

@@ -79,7 +79,7 @@
     </button>
     <button class="nav-item" data-view="institution">
       <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M9 8h1"/><path d="M9 12h1"/><path d="M9 16h1"/><path d="M14 8h1"/><path d="M14 12h1"/><path d="M14 16h1"/><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16"/></svg></span>
-      <span>حساب العين</span>
+      <span>عن المنصة</span>
     </button>
     <button class="nav-item" data-view="news">
       <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6z"/></svg></span>
@@ -112,8 +112,8 @@
       // Use the SAME hostname the page is loaded from so cookies stay first-party —
       // 127.0.0.1 and localhost are different sites to the browser, and SameSite=Strict
       // cookies set by the backend on one are rejected when the page is on the other.
-      window.AL_AYN_API = (isLocal && p && p !== '7860') ? ('http://' + h + ':7860') : '';
-      window.AL_AYN_IS_LOCAL = isLocal;
+      window.WAMAN_API = (isLocal && p && p !== '7860') ? ('http://' + h + ':7860') : '';
+      window.WAMAN_IS_LOCAL = isLocal;
     })();
   </script>
 
@@ -133,7 +133,7 @@
        entry point has bare `react`/`react-dom` imports a plain
        <script type="module"> cannot resolve without a bundler. -->
   <script type="module">
-    if (window.AL_AYN_IS_LOCAL) {
+    if (window.WAMAN_IS_LOCAL) {
       Promise.all([
         import('./js/vendor/qapture-standalone.js'),
         import('./qa.config.js'),

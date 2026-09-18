@@ -54,7 +54,7 @@ router.get('/', ...roleRequired('superadmin'), async (req, res, next) => {
       auditLogs: auditLogs.rows.length,
     };
 
-    const filename = `alayn-backup-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+    const filename = `waman-ahyaha-backup-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
     await pool.query(
       `INSERT INTO backups(type,actor_id,filename,size_bytes,record_counts,checksum) VALUES($1,$2,$3,$4,$5,$6)`,
       ['manual', req.user.sub, filename, Buffer.byteLength(jsonStr), JSON.stringify(recordCounts), checksum]

@@ -1,4 +1,4 @@
-/* AL-AYN — Error message translator (server English → Arabic for end users)
+/* Waman Ahyaha — Error message translator (server English → Arabic for end users)
  *
  * Usage:
  *   Errors.t('phone or PIN incorrect')   → 'رقم الهاتف أو رمز الدخول غير صحيح'

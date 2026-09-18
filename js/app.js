@@ -1,9 +1,9 @@
 /* ============================================================
    WAMAN-AHYAHA DONATION TRACKER — MAIN APPLICATION
    ============================================================ */
-// API base is set by index.html via window.AL_AYN_API, or falls back to same origin.
-// apiClient.js reads API.BASE from window.AL_AYN_API automatically.
-const API_BASE_URL = window.AL_AYN_API || '';
+// API base is set by index.html via window.WAMAN_API, or falls back to same origin.
+// apiClient.js reads API.BASE from window.WAMAN_API automatically.
+const API_BASE_URL = window.WAMAN_API || '';
 
 const App = {
   currentView: 'landing',
@@ -48,13 +48,13 @@ const App = {
     SyncQueue._flush();
 
     // A queued change the server refused (bad data / not allowed) — tell the user.
-    window.addEventListener('alayn:syncFailed', (e) => {
+    window.addEventListener('waman:syncFailed', (e) => {
       const msg = e.detail?.error || '';
       this.toast('لم يتم حفظ أحد التغييرات على الخادم' + (msg ? ': ' + msg : ''), 'error');
     });
 
     // Listen for server-side logout (401 on any request)
-    window.addEventListener('alayn:loggedOut', () => {
+    window.addEventListener('waman:loggedOut', () => {
       DB.logout();
       this.navigate('landing');
       this.toast('انتهت جلستك، يرجى تسجيل الدخول مجدداً', 'warning');
@@ -120,7 +120,7 @@ const App = {
       collectors:  ['collectors', 'المسؤولون'],
       profile:     ['profile', 'حسابي'],
       newcampaign: ['newcampaign', 'ابدأ حملتك'],
-      institution: ['institution', 'حساب العين'],
+      institution: ['institution', 'عن المنصة'],
       orphans:     ['orphans', 'الأيتام'],
     };
 
@@ -2196,7 +2196,7 @@ const App = {
     const data = DB.exportAll();
     const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
     const url  = URL.createObjectURL(blob);
-    const a    = Object.assign(document.createElement('a'),{href:url,download:`alayn-${new Date().toISOString().slice(0,10)}.json`});
+    const a    = Object.assign(document.createElement('a'),{href:url,download:`waman-${new Date().toISOString().slice(0,10)}.json`});
     a.click(); URL.revokeObjectURL(url);
     this.toast('تم التصدير');
   },
@@ -2217,7 +2217,7 @@ const App = {
     if (btn) { btn.disabled = true; btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.refresh}</span> جارٍ التصدير...`; }
     try {
       const data = await API.get('/api/export');
-      const filename = `alayn-backup-${new Date().toISOString().slice(0,10)}.json`;
+      const filename = `waman-ahyaha-backup-${new Date().toISOString().slice(0,10)}.json`;
       this._downloadJSON(data, filename);
       const counts = data.users?.length || 0;
       this.toast(`تم تصدير النسخة الاحتياطية (${counts} مستخدم، ${data.donations?.length || 0} تبرع)`);
@@ -2256,7 +2256,7 @@ const App = {
     try {
       const data = await API.get('/api/export/group/' + groupId);
       const groupName = data.group?.name || 'حملة';
-      const filename = `alayn-${groupName}-${new Date().toISOString().slice(0,10)}.json`;
+      const filename = `waman-${groupName}-${new Date().toISOString().slice(0,10)}.json`;
       this._downloadJSON(data, filename);
       this.closeModal();
       this.toast(`تم تصدير بيانات "${groupName}"`);
@@ -2409,7 +2409,7 @@ const App = {
       <div class="container">
         <div class="card fade-up" style="margin-bottom:20px;background:linear-gradient(135deg,var(--primary) 0%,var(--primary-dark) 100%);border:none;color:white;text-align:center;padding:32px 24px">
           <div style="color:var(--gold); display:flex; justify-content:center; margin-bottom:12px; transform:scale(2);">${Icons.star}</div>
-          <h2 style="color:white;margin-bottom:8px">ابدأ حملتك مع حساب العين</h2>
+          <h2 style="color:white;margin-bottom:8px">ابدأ حملتك على منصة ومن أحياها</h2>
           <p style="color:rgba(255,255,255,.85);font-size:.95rem;margin:0">نرحب بكل من يريد إطلاق حملة تبرعات جديدة. نحن هنا لمساعدتك!</p>
         </div>
 
@@ -2449,7 +2449,7 @@ const App = {
         <div class="card fade-up delay-3" style="margin-bottom:20px;text-align:center">
           <p class="text-muted" style="margin-bottom:12px;font-size:.9rem">أو تواصل معنا مباشرةً:</p>
           <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-            <a href="https://wa.me/9647777961845?text=${encodeURIComponent('السلام عليكم\nأريد بدء حملة جديدة لدعم حساب العين')}" target="_blank" class="wa-btn wa-btn-whatsapp">
+            <a href="https://wa.me/9647777961845?text=${encodeURIComponent('السلام عليكم\nأريد بدء حملة كفالة جديدة على منصة ومن أحياها')}" target="_blank" class="wa-btn wa-btn-whatsapp">
               <span class="icon icon-sm">${Icons.whatsapp}</span> واتساب
             </a>
             <a href="https://t.me/+9647777961845" target="_blank" class="wa-btn wa-btn-telegram">
@@ -2475,79 +2475,62 @@ const App = {
   },
 
   // ─────────────────────────────────────────────────────────────
-  // AL-AYN INSTITUTION HUB
+  // ABOUT THE PLATFORM + SUPPORT (tab "عن المنصة")
   // ─────────────────────────────────────────────────────────────
   renderInstitution() {
     const view = this._show('view-institution');
-    const user = Auth.currentUser();
+    const steps = [
+      [Icons.heart,  'تعهّد شهري واضح',      'كل متبرع يحدد مبلغه الشهري، ويرى حالة تبرعه لكل شهر في جدول الحملة.'],
+      [Icons.users,  'مسؤول جمع لكل متبرع',   'يستلم مسؤول الجمع التبرعات ويؤكدها في الجدول، فتظهر فوراً لإدارة الحملة.'],
+      [Icons.chart,  'شفافية ومنافسة إيجابية', 'نسبة إنجاز كل حملة وعدد الأيتام المكفولين أمام الجميع، مع تذكيرات عبر تليجرام.'],
+    ];
 
     view.innerHTML = `
       <div class="container">
-        <!-- Institution Header -->
-        <div class="card fade-up" style="margin-bottom:20px;background:linear-gradient(135deg,var(--hero-bg) 0%,var(--hero-bg-dark) 100%);border:none;color:white;text-align:center;padding:28px 20px">
-          <div style="color:var(--primary); margin-bottom:8px; display:inline-block; transform:scale(1.5)">${Icons.building}</div>
-          <h3 style="color:white;margin-bottom:4px">حساب العين للرعاية الاجتماعية</h3>
-          <p style="color:rgba(255,255,255,.8);font-size:.875rem;margin:0">أخبار وحملات حساب العين</p>
+        <div class="card fade-up about-hero">
+          <div class="about-hero-icon">${Icons.heart}</div>
+          <h3>ومن أحياها</h3>
+          <p class="about-verse">﴿وَمَنْ أَحْيَاهَا فَكَأَنَّمَا أَحْيَا النَّاسَ جَمِيعًا﴾</p>
+          <p class="about-lead">منصة لتنظيم حملات الكفالة الشهرية للأيتام التي يديرها طلاب الجامعات: المتبرع يعرف أين وصل تبرعه، ومسؤول الجمع يتابع قائمته بسهولة.</p>
         </div>
 
-        <!-- ============================================
-             أخبار حساب العين — يمكنك تعديل/إضافة المنشورات هنا
-             ============================================ -->
-        <div class="section-header fade-up delay-1"><h4 class="section-title">آخر أخبار حساب العين</h4></div>
+        <div class="section-header fade-up delay-1"><h4 class="section-title">كيف تعمل المنصة</h4></div>
+        ${steps.map(([icon, title, desc]) => `
+          <div class="card fade-up delay-1 about-step">
+            <div class="about-step-icon">${icon}</div>
+            <div>
+              <div class="about-step-title">${title}</div>
+              <p class="text-sm">${desc}</p>
+            </div>
+          </div>`).join('')}
 
-        <!-- ★ منشور 1 — غيّر العنوان والنص -->
-        <div class="card fade-up delay-1" style="margin-bottom:14px;border-right:4px solid var(--gold)">
-          <div style="font-weight:800;font-size:1rem;color:var(--text-heading);margin-bottom:8px;display:flex;align-items:center;gap:6px"><span class="icon icon-sm" style="color:var(--primary)">${Icons.heart}</span> حملة كفالة أيتام العراق</div>
-          <p class="text-sm" style="color:var(--text-body);line-height:1.9;margin:0">
-            بفضل الله ثم جهودكم، تمكنّا من كفالة المئات من الأيتام في مختلف المحافظات العراقية.
-            هذا النص تجريبي — يمكنك استبداله بأي محتوى تريده.
-          </p>
+        <div class="card fade-up delay-2" style="margin:20px 0;text-align:center">
+          <p class="text-muted" style="margin-bottom:12px;font-size:.9rem">تريد إطلاق حملة كفالة في جامعتك؟</p>
+          <button class="btn btn-primary w-full" onclick="App.navigate('newcampaign')">
+            <span class="icon icon-sm icon-white">${Icons.star}</span> ابدأ حملة جديدة
+          </button>
         </div>
 
-        <!-- ★ منشور 2 -->
-        <div class="card fade-up delay-1" style="margin-bottom:14px;border-right:4px solid var(--success)">
-          <div style="font-weight:800;font-size:1rem;color:var(--text-heading);margin-bottom:8px;display:flex;align-items:center;gap:6px"><span class="icon icon-sm" style="color:var(--primary)">${Icons.heart}</span> مبادرة دعم مرضى السرطان</div>
-          <p class="text-sm" style="color:var(--text-body);line-height:1.9;margin:0">
-            يساهم حساب العين في دعم مرضى السرطان عبر توفير الأدوية والمستلزمات.
-            هذا النص تجريبي — استبدله بمحتواك الخاص.
-          </p>
-        </div>
-
-        <!-- ★ منشور 3 -->
-        <div class="card fade-up delay-1" style="margin-bottom:20px;border-right:4px solid var(--primary)">
-          <div style="font-weight:800;font-size:1rem;color:var(--text-heading);margin-bottom:8px;display:flex;align-items:center;gap:6px"><span class="icon icon-sm" style="color:var(--primary)">${Icons.heart}</span> مساعدة العوائل المتعففة</div>
-          <p class="text-sm" style="color:var(--text-body);line-height:1.9;margin:0">
-            توزيع السلات الغذائية والمساعدات المادية للعوائل المتعففة في عموم العراق.
-            هذا النص تجريبي — استبدله بمحتواك.
-          </p>
-        </div>
-        <!-- ============================================ -->
-
-        <!-- Social Media Links -->
-        <div class="card fade-up delay-2" style="margin-bottom:20px;text-align:center">
-          <h4 style="margin-bottom:14px;color:var(--text-heading);display:flex;align-items:center;justify-content:center;gap:6px"><span class="icon icon-sm" style="color:var(--text-body)">${Icons.globe}</span> تابعنا على</h4>
-          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-            <a href="https://www.instagram.com/aynyateem/" target="_blank" class="btn btn-outline btn-sm" style="border-color:#E1306C;color:#E1306C;display:flex;align-items:center;gap:4px">
-              <span class="icon icon-sm">${Icons.camera}</span> Instagram
-            </a>
-            <a href="https://www.facebook.com/aynyateem/" target="_blank" class="btn btn-outline btn-sm" style="border-color:#1877F2;color:#1877F2;display:flex;align-items:center;gap:4px">
-              <span class="icon icon-sm">${Icons.facebook}</span> Facebook
-            </a>
-            <a href="https://aynyateem.com" target="_blank" class="btn btn-outline btn-sm" style="border-color:var(--primary);color:var(--primary);display:flex;align-items:center;gap:4px">
-              <span class="icon icon-sm">${Icons.globe}</span> aynyateem.com
-            </a>
-          </div>
-        </div>
-
-        <!-- Private Support Message Form -->
         <div class="card fade-up delay-3" style="margin-bottom:20px;border-top:3px solid var(--gold)">
-          <h4 style="margin-bottom:6px;color:var(--text-heading);display:flex;align-items:center;gap:6px"><span class="icon icon-sm" style="color:var(--text-body)">${Icons.mail}</span> تواصل مع موظف العين</h4>
-          <p class="text-sm text-muted" style="margin-bottom:16px">اكتب سؤالك أو ملاحظتك هنا. الرسالة خاصة ولن يطلع عليها أحد غير موظفي حساب العين.</p>
+          <h4 style="margin-bottom:6px;color:var(--text-heading);display:flex;align-items:center;gap:6px"><span class="icon icon-sm" style="color:var(--text-body)">${Icons.mail}</span> تواصل مع إدارة المنصة</h4>
+          <p class="text-sm text-muted" style="margin-bottom:16px">اكتب سؤالك أو ملاحظتك هنا. تصل الرسالة إلى إدارة المنصة فقط.</p>
           <div class="form-group">
             <textarea id="support-msg" class="form-input" rows="3" placeholder="اكتب رسالتك هنا..."></textarea>
           </div>
           <button class="btn btn-gold w-full" onclick="App.submitSupportMessage()">إرسال الرسالة</button>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:14px">
+            <a href="https://wa.me/9647777961845" target="_blank" rel="noopener" class="wa-btn wa-btn-whatsapp">
+              <span class="icon icon-sm">${Icons.whatsapp}</span> واتساب
+            </a>
+            <a href="https://t.me/+9647777961845" target="_blank" rel="noopener" class="wa-btn wa-btn-telegram">
+              <span class="icon icon-sm">${Icons.telegram}</span> تيليجرام
+            </a>
+          </div>
         </div>
+
+        <p class="text-center text-xs" style="margin-bottom:20px">
+          <a href="/privacy.html" target="_blank" rel="noopener">سياسة الخصوصية</a>
+        </p>
 
         ${this._renderSupportInbox()}
       </div>`;

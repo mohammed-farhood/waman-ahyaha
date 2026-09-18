@@ -1,15 +1,15 @@
 [Unit]
-Description=AL-AYN donation tracker API (al-ayn.srv1956050.hstgr.cloud)
+Description=Waman Ahyaha donation tracker API (waman-ahyaha.srv1956050.hstgr.cloud)
 After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
 Type=simple
-User=alayn
-Group=alayn
-WorkingDirectory=/opt/al-ayn/backend
-# Secrets, DATABASE_URL, superadmin bootstrap values. root:alayn 0640.
-EnvironmentFile=/etc/al-ayn/al-ayn.env
+User=waman
+Group=waman
+WorkingDirectory=/opt/waman-ahyaha/backend
+# Secrets, DATABASE_URL, superadmin bootstrap values. root:waman 0640.
+EnvironmentFile=/etc/waman-ahyaha/waman-ahyaha.env
 Environment=NODE_ENV=production
 Environment=PORT=7860
 Environment=HOST=127.0.0.1

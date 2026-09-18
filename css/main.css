@@ -10,7 +10,7 @@
    Primary teal: #2A8FA0  Gold accent: #C8A92A
    ============================================================ */
 :root {
-  /* Brand — matched exactly from aynyateem.com */
+  /* Brand */
   --primary:          #2A8FA0;
   --primary-dark:     #1D6B79;
   --primary-darker:   #145563;
@@ -1156,6 +1156,24 @@ body[dir="ltr"] .toast { border-right: none; border-left: 4px solid var(--primar
 @media (min-width: 1024px) {
   .container { padding: 0 var(--sp-8); }
 }
+
+/* ── About page ────────────────────────────────────────── */
+.about-hero {
+  margin-bottom: 20px; text-align: center; padding: 28px 20px; border: none; color: white;
+  background: linear-gradient(135deg, var(--hero-bg) 0%, var(--hero-bg-dark) 100%);
+}
+.about-hero h3 { color: white; margin-bottom: 6px; }
+.about-hero-icon { color: var(--gold-light); display: inline-flex; transform: scale(1.6); margin-bottom: 14px; }
+.about-verse { color: var(--gold-light); font-size: 1rem; font-weight: 700; margin-bottom: 10px; }
+.about-lead { color: rgba(255,255,255,.85); font-size: .9rem; line-height: 1.9; margin: 0; }
+.about-step { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; padding: 16px; }
+.about-step p { color: var(--text-body); line-height: 1.8; margin: 2px 0 0; }
+.about-step-icon {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: var(--r-md);
+  background: var(--primary-bg); color: var(--primary);
+  display: flex; align-items: center; justify-content: center;
+}
+.about-step-title { font-weight: 800; color: var(--text-heading); }
 
 /* ── Telegram bot settings ─────────────────────────────── */
 .settings-row {

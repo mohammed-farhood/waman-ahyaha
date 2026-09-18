@@ -1,23 +1,23 @@
-# AL-AYN — Deployment Guide
+# Waman Ahyaha — Deployment Guide
 
 > For the engineer doing the deploy + the Claude Code session helping them.
 > Last updated: 2026-09-19. Tested against backend v2.1.0.
 
 ## 0. Current production (read this first)
 
-**Live at https://al-ayn.srv1956050.hstgr.cloud** — Hostinger VPS (`ssh sinan-vps`), deployed 2026-09-19.
+**Live at https://waman-ahyaha.srv1956050.hstgr.cloud** — Hostinger VPS (`ssh sinan-vps`), deployed 2026-09-19.
 Frontend and API are on the **same origin**, which is simpler than the split
 Hugging Face + GitHub Pages layout described in §2–§7 (kept as an alternative).
 
 | What | Where |
 |---|---|
-| Code | `/opt/al-ayn/frontend` (static, served by nginx) and `/opt/al-ayn/backend` |
-| API service | systemd `al-ayn` → Node on `127.0.0.1:7860` (`journalctl -u al-ayn -f`) |
-| Secrets + DB URL | `/etc/al-ayn/al-ayn.env` (root:alayn 0640). Back up `PG_ENC_KEY` / `PHONE_HMAC_KEY` — never change them |
-| Database | local Postgres, db `alayn_prod`, role `alayn_user`, `pgcrypto` enabled |
-| nginx | `/etc/nginx/sites-available/al-ayn.conf` (from `deploy/nginx-al-ayn.conf`), Let's Encrypt cert auto-renews |
-| Backups | `/etc/cron.daily/al-ayn-backup` → `/var/backups/al-ayn/*.dump` (7 days) — restore with `pg_restore` |
-| Telegram | disabled (`TELEGRAM_BOT_TOKEN` empty). To enable: put the token in the env file, `systemctl restart al-ayn`, and stop any old Hugging Face copy polling the same bot |
+| Code | `/opt/waman-ahyaha/frontend` (static, served by nginx) and `/opt/waman-ahyaha/backend` |
+| API service | systemd `waman-ahyaha` → Node on `127.0.0.1:7860` (`journalctl -u waman-ahyaha -f`) |
+| Secrets + DB URL | `/etc/waman-ahyaha/waman-ahyaha.env` (root:waman 0640). Back up `PG_ENC_KEY` / `PHONE_HMAC_KEY` — never change them |
+| Database | local Postgres, db `waman_prod`, role `waman_user`, `pgcrypto` enabled |
+| nginx | `/etc/nginx/sites-available/waman-ahyaha.conf` (from `deploy/nginx-waman-ahyaha.conf`), Let's Encrypt cert auto-renews |
+| Backups | `/etc/cron.daily/waman-ahyaha-backup` → `/var/backups/waman-ahyaha/*.dump` (7 days) — restore with `pg_restore` |
+| Telegram | disabled (`TELEGRAM_BOT_TOKEN` empty). To enable: put the token in the env file, `systemctl restart waman-ahyaha`, and stop any old Hugging Face copy polling the same bot |
 
 **Redeploy after changing code** (from the repo root on the Mac, after committing):
 
@@ -29,18 +29,18 @@ Bump the `?v=NN` numbers in `index.html` whenever JS/CSS changes (static files a
 
 **Superadmins**: created with `deploy/bootstrap-superadmin.sh` from the `SUPERADMIN_*` values in the
 env file (PIN lines are blanked afterwards). To reset a forgotten superadmin password: put the phone and
-a new PIN back into the env file, run `ssh sinan-vps bash /opt/al-ayn/deploy/bootstrap-superadmin.sh`,
+a new PIN back into the env file, run `ssh sinan-vps bash /opt/waman-ahyaha/deploy/bootstrap-superadmin.sh`,
 then blank the PIN line again.
 
-**Fresh server from scratch**: `bash deploy/deploy.sh`, then `ssh sinan-vps bash /opt/al-ayn/deploy/setup-server.sh`.
+**Fresh server from scratch**: `bash deploy/deploy.sh`, then `ssh sinan-vps bash /opt/waman-ahyaha/deploy/setup-server.sh`.
 
 ---
 
-This document tells you everything you need to put AL-AYN online safely. Read all of it before starting — it's short for a reason, every section matters.
+This document tells you everything you need to put Waman Ahyaha online safely. Read all of it before starting — it's short for a reason, every section matters.
 
 ---
 
-## 1. What AL-AYN is
+## 1. What Waman Ahyaha is
 
 A Progressive Web App (Arabic, RTL) for tracking monthly orphan-sponsorship donations across multiple campaign "groups" (each group is its own campaign/university).
 
@@ -126,7 +126,7 @@ Migrations run automatically every time the backend starts. They live in `backen
 ### 6a. Create the Space
 
 1. On huggingface.co → New Space → SDK: **Docker** → Public or Private (your call).
-2. Set the Space repo URL — clone it locally OR add it as a git remote on the AL-AYN repo:
+2. Set the Space repo URL — clone it locally OR add it as a git remote on the Waman Ahyaha repo:
    ```bash
    git remote add hf https://huggingface.co/spaces/<YOUR-USER>/<YOUR-SPACE>
    git push hf main
@@ -214,7 +214,7 @@ Open `index.html`. Around line 99 there's a small script:
     var h = location.hostname;
     var p = location.port;
     var isLocal = h === 'localhost' || h === '127.0.0.1';
-    window.AL_AYN_API = (isLocal && p && p !== '7860') ? 'http://localhost:7860' : '';
+    window.WAMAN_API = (isLocal && p && p !== '7860') ? 'http://localhost:7860' : '';
   })();
 </script>
 ```
@@ -222,12 +222,12 @@ Open `index.html`. Around line 99 there's a small script:
 For **production split-hosting** (frontend on GitHub Pages, backend on HF Space) you MUST set the production URL. Change the line to:
 
 ```js
-window.AL_AYN_API = isLocal
+window.WAMAN_API = isLocal
   ? ((p && p !== '7860') ? 'http://localhost:7860' : '')
   : 'https://<YOUR-SPACE>.hf.space';   // ← your HF Space URL, no trailing slash
 ```
 
-> If you ever serve the frontend from the same origin as the backend (i.e. you make the backend serve static files too), leave `AL_AYN_API` empty (`''`) — that means "same origin." That's not the default deployment.
+> If you ever serve the frontend from the same origin as the backend (i.e. you make the backend serve static files too), leave `WAMAN_API` empty (`''`) — that means "same origin." That's not the default deployment.
 
 ### 7b. Publish to GitHub Pages
 
@@ -243,7 +243,7 @@ window.AL_AYN_API = isLocal
 4. The POST to `/api/auth/login` should hit `https://<YOUR-SPACE>.hf.space/api/auth/login` and return `{"success":true,"require_pin":true}`.
 5. Enter the password → you should land on the home screen.
 
-If the request hits the wrong host: §7a was skipped — re-check `window.AL_AYN_API`.
+If the request hits the wrong host: §7a was skipped — re-check `window.WAMAN_API`.
 If you see CORS errors in Console: the GitHub Pages URL isn't in `CORS_ORIGIN` on the Space — fix and restart.
 If you see "ERR_BLOCKED_BY_RESPONSE" or cookies aren't sticking: `COOKIE_SECURE` or `COOKIE_SAMESITE` is wrong (must be `true` / `None` for cross-origin).
 
@@ -292,7 +292,7 @@ Do **not** weaken these without thinking carefully.
 | bcrypt cost 12 on all PINs | `auth.js`, `users.js` | Any string 4–20 chars accepted; superadmin uses a long password. |
 | Account lockout after 5 failed PINs for 15 min | `auth.js` | Per-user, in DB. |
 | Rate limit: login 5/15min in production, 100/min in dev | `middleware/rateLimit.js` | Triggered by `NODE_ENV`. |
-| CSRF: double-submit cookie (`alayn_csrf`); state-changing requests need `X-CSRF-Token` header equal to cookie | `middleware/csrf.js` | Public auth endpoints (`/login`, `/register-donor`, `/refresh`) are exempt. |
+| CSRF: double-submit cookie (`waman_csrf`); state-changing requests need `X-CSRF-Token` header equal to cookie | `middleware/csrf.js` | Public auth endpoints (`/login`, `/register-donor`, `/refresh`) are exempt. |
 | CORS allowlist (no wildcard reflection) with `credentials: true` | `app.js` | Env-driven `CORS_ORIGIN`. |
 | Helmet security headers | `app.js` | CSP intentionally disabled because the frontend uses inline `onclick=` handlers; XSS is mitigated by per-field escaping (see below). |
 | Cross-group authorization (IDOR protection) on every list/read/write route | `routes/users.js, orphans.js, donations.js, announcements.js, payReports.js` | Uses `assertGroup()` / `effectiveGroupId()` helpers in `middleware/auth.js`. Superadmins are global; everyone else is pinned to `req.user.groupId`. |
@@ -327,7 +327,7 @@ node scripts/import-from-export.js path/to/snapshot.json   # One-time migration 
 
 ### "Login button does nothing in the browser"
 - Open DevTools → Network. Look at the POST to `/api/auth/login`.
-- **501 Unsupported method** → frontend is hitting the static host, not the backend. Fix `window.AL_AYN_API` in §7a.
+- **501 Unsupported method** → frontend is hitting the static host, not the backend. Fix `window.WAMAN_API` in §7a.
 - **CORS errors** → the frontend origin is missing from `CORS_ORIGIN` env on the Space. Add and restart.
 - **400 Bad Request** with `phone: ...` → phone format is invalid; must be Iraqi (+964 + 7XXXXXXXXX) or a number `libphonenumber-js` accepts.
 - **403 invalid CSRF token** → only happens if you've changed the CSRF middleware mount; should not occur on a fresh deploy.
@@ -347,7 +347,7 @@ Run `npm run wipe` from `backend/` (preserves superadmins). Then **also** tell a
 
 ```js
 // Paste in browser DevTools console:
-Object.keys(localStorage).filter(k => k.startsWith('alayn_')).forEach(k => localStorage.removeItem(k));
+Object.keys(localStorage).filter(k => k.startsWith('waman_')).forEach(k => localStorage.removeItem(k));
 location.reload();
 ```
 
@@ -425,7 +425,7 @@ Tick all of these before announcing the app is live:
 
 A few things to keep in mind as you assist:
 
-- The deployer's most likely first failure is "login doesn't work" — 80% of the time it's `window.AL_AYN_API` not pointing at the backend, `CORS_ORIGIN` missing the frontend, or `COOKIE_SAMESITE` left as `Strict` for a cross-origin deploy. Check Network tab status codes before guessing.
+- The deployer's most likely first failure is "login doesn't work" — 80% of the time it's `window.WAMAN_API` not pointing at the backend, `CORS_ORIGIN` missing the frontend, or `COOKIE_SAMESITE` left as `Strict` for a cross-origin deploy. Check Network tab status codes before guessing.
 - Migrations run automatically on `node server.js`. Do not invent a separate "run migrations" command — there isn't one.
 - The Postgres encryption keys (`PG_ENC_KEY`, `PHONE_HMAC_KEY`) cannot be rotated. If the deployer asks "should we change these to be more secure?", the answer is no — generate them once, save them in a password manager, never touch them again.
 - The rate limit in production is strict (5 login attempts per 15min per phone+IP). When debugging, restart the backend to clear it — there's no API to flush it.

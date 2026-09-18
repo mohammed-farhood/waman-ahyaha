@@ -1,4 +1,4 @@
-/* AL-AYN Sync Queue — optimistic local writes flushed to server
+/* Waman Ahyaha Sync Queue — optimistic local writes flushed to server
  *
  * Every op is tagged with the user who made it and is only ever sent while that
  * same user is logged in, so one person's queued changes can never be replayed
@@ -8,17 +8,17 @@
  *   2xx                      → removed (and reconciled into the cache if asked)
  *   network / 429 / 5xx      → kept, retried later with backoff
  *   401                      → kept; flushing pauses until the user logs in again
- *   other 4xx                → removed, and 'alayn:syncFailed' tells the UI
+ *   other 4xx                → removed, and 'waman:syncFailed' tells the UI
  */
 
 const SyncQueue = {
-  KEY: 'alayn_pending_ops',
+  KEY: 'waman_pending_ops',
   _flushing: false,
   _retryTimer: null,
   _backoff: 0,
 
   _owner() {
-    try { return localStorage.getItem('alayn_current_user') || null; } catch { return null; }
+    try { return localStorage.getItem('waman_current_user') || null; } catch { return null; }
   },
 
   enqueue(op) {
@@ -84,7 +84,7 @@ const SyncQueue = {
             error: err.message, response: err.data,
           };
           console.error('[SyncQueue] DROPPED op:', detail);
-          try { window.dispatchEvent(new CustomEvent('alayn:syncFailed', { detail })); } catch {}
+          try { window.dispatchEvent(new CustomEvent('waman:syncFailed', { detail })); } catch {}
         }
       }
     } finally {

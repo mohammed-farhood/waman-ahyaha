@@ -1,10 +1,10 @@
-/* AL-AYN API Client — cookie-based session, CSRF protection */
+/* Waman Ahyaha API Client — cookie-based session, CSRF protection */
 
 const API = {
-  BASE: window.AL_AYN_API || '',
+  BASE: window.WAMAN_API || '',
 
   csrf() {
-    const m = document.cookie.match(/(?:^|; )alayn_csrf=([^;]+)/);
+    const m = document.cookie.match(/(?:^|; )waman_csrf=([^;]+)/);
     return m ? decodeURIComponent(m[1]) : '';
   },
 
@@ -57,7 +57,7 @@ const API = {
       if (!res || res.status === 401) {
         if (hasSession && !this._loggedOutFired) {
           this._loggedOutFired = true;
-          window.dispatchEvent(new CustomEvent('alayn:loggedOut'));
+          window.dispatchEvent(new CustomEvent('waman:loggedOut'));
           setTimeout(() => { this._loggedOutFired = false; }, 1000);
         }
         throw this._err('unauthenticated', 401);

@@ -5,7 +5,7 @@ const crypto  = require('crypto');
 const pool    = require('../db/pool');
 const { normalize, hmac } = require('../services/phone');
 const { write: audit }    = require('../services/audit');
-const { authRequired }    = require('../middleware/auth');
+const { authRequired, isMobile } = require('../middleware/auth');
 const { body: validate, phoneRaw, pinRaw, strongPin } = require('../middleware/validate');
 const { loginLimiter, registerDonorLimiter } = require('../middleware/rateLimit');
 const { z } = require('zod');
@@ -39,7 +39,8 @@ async function signRefresh(userId, ip, ua, client) {
 
 const SAFE_COLS = 'id,name,phone,role,group_id,collector_id,amount,is_anonymous,join_date,stage,availability,telegram_chat_id,created_at,updated_at';
 
-// Create a session row and set the access + refresh cookies.
+// Create a session row. The web gets httpOnly cookies; the mobile app
+// (X-Client: mobile) gets the tokens back to keep in its secure storage.
 async function issueSession(res, user, req) {
   const client = await pool.connect();
   let refreshRaw;
@@ -50,8 +51,16 @@ async function issueSession(res, user, req) {
   } catch (e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
 
-  res.cookie('alayn_at', signAccess(user), { ...COOKIE_OPTS(), maxAge: 15 * 60 * 1000 });
-  res.cookie('alayn_rt', refreshRaw,       { ...COOKIE_OPTS(), maxAge: 30 * 24 * 3600 * 1000, path: '/api/auth' });
+  const accessToken = signAccess(user);
+  if (isMobile(req)) return { accessToken, refreshToken: refreshRaw };
+  res.cookie('waman_at', accessToken, { ...COOKIE_OPTS(), maxAge: 15 * 60 * 1000 });
+  res.cookie('waman_rt', refreshRaw,  { ...COOKIE_OPTS(), maxAge: 30 * 24 * 3600 * 1000, path: '/api/auth' });
+  return {};
+}
+
+// Refresh token from the cookie (web) or the request body (mobile).
+function refreshFromReq(req) {
+  return req.cookies?.waman_rt || (typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : '');
 }
 
 // POST /api/auth/login
@@ -97,19 +106,19 @@ router.post('/login', loginLimiter, validate(z.object({
     // Reset lockout
     await pool.query('UPDATE users SET failed_attempts=0, locked_until=NULL WHERE id=$1', [user.id]);
 
-    await issueSession(res, user, req);
+    const tokens = await issueSession(res, user, req);
 
     const { pin_hash, phone_hash, failed_attempts, locked_until, deleted_at, ...safeUser } = user;
     await audit({ actorId: user.id, action: 'login', entityType: 'user', entityId: user.id, ip: req.ip, ua: req.headers['user-agent'] });
 
-    res.json({ success: true, user: safeUser });
+    res.json({ success: true, user: safeUser, ...tokens });
   } catch (err) { next(err); }
 });
 
 // POST /api/auth/refresh
 router.post('/refresh', async (req, res, next) => {
   try {
-    const raw = req.cookies?.alayn_rt;
+    const raw = refreshFromReq(req);
     if (!raw) return res.status(401).json({ success: false, error: 'no refresh token' });
 
     const hash = crypto.createHash('sha256').update(raw).digest('hex');
@@ -135,8 +144,9 @@ router.post('/refresh', async (req, res, next) => {
     finally { client.release(); }
 
     const accessToken = signAccess(ur[0]);
-    res.cookie('alayn_at', accessToken, { ...COOKIE_OPTS(), maxAge: 15 * 60 * 1000 });
-    res.cookie('alayn_rt', newRaw, { ...COOKIE_OPTS(), maxAge: 30 * 24 * 3600 * 1000, path: '/api/auth' });
+    if (isMobile(req)) return res.json({ success: true, accessToken, refreshToken: newRaw });
+    res.cookie('waman_at', accessToken, { ...COOKIE_OPTS(), maxAge: 15 * 60 * 1000 });
+    res.cookie('waman_rt', newRaw, { ...COOKIE_OPTS(), maxAge: 30 * 24 * 3600 * 1000, path: '/api/auth' });
     res.json({ success: true });
   } catch (err) { next(err); }
 });
@@ -146,13 +156,13 @@ router.post('/refresh', async (req, res, next) => {
 // session must still be revoked and both cookies cleared.
 router.post('/logout', async (req, res, next) => {
   try {
-    const raw = req.cookies?.alayn_rt;
+    const raw = refreshFromReq(req);
     if (raw) {
       const hash = crypto.createHash('sha256').update(raw).digest('hex');
       await pool.query('DELETE FROM sessions WHERE refresh_token_hash=$1', [hash]);
     }
-    res.clearCookie('alayn_at', COOKIE_OPTS());
-    res.clearCookie('alayn_rt', { ...COOKIE_OPTS(), path: '/api/auth' });
+    res.clearCookie('waman_at', COOKIE_OPTS());
+    res.clearCookie('waman_rt', { ...COOKIE_OPTS(), path: '/api/auth' });
     res.json({ success: true });
   } catch (err) { next(err); }
 });
@@ -208,8 +218,8 @@ router.post('/register-donor', registerDonorLimiter, validate(z.object({
     const { rows } = await pool.query(`SELECT ${SAFE_COLS} FROM users WHERE id=$1`, [id]);
     await audit({ action: 'register_donor', entityType: 'user', entityId: id, after: rows[0], ip: req.ip });
     // Donors log in with their phone alone, so registering signs them in.
-    await issueSession(res, rows[0], req);
-    res.status(201).json({ success: true, user: rows[0] });
+    const tokens = await issueSession(res, rows[0], req);
+    res.status(201).json({ success: true, user: rows[0], ...tokens });
   } catch (err) { next(err); }
 });
 
@@ -245,6 +255,43 @@ router.post('/register-collector', authRequired, validate(z.object({
     await audit({ actorId: req.user.sub, action: 'register_collector', entityType: 'user', entityId: id, after: rows[0], ip: req.ip });
     res.status(201).json({ success: true, user: rows[0] });
   } catch (err) { next(err); }
+});
+
+// DELETE /api/auth/me — a user deletes their own account (App Store / Play requirement).
+// Personal data is erased; past donation rows stay, attached to an anonymous
+// placeholder, because they are the campaign's financial records.
+router.delete('/me', authRequired, validate(z.object({
+  confirm: z.literal('DELETE'),
+  pin:     z.string().max(20).optional(),
+})), async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query('SELECT * FROM users WHERE id=$1 AND deleted_at IS NULL', [req.user.sub]);
+    const u = rows[0];
+    if (!u) return res.status(404).json({ success: false, error: 'user not found' });
+    if (u.role === 'superadmin') return res.status(403).json({ success: false, error: 'superadmin cannot self-delete' });
+    if (['admin', 'collector'].includes(u.role)) {
+      const ok = await bcrypt.compare(String(req.body.pin || ''), u.pin_hash || '');
+      if (!ok) return res.status(403).json({ success: false, error: 'current PIN incorrect' });
+    }
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE users SET name='مستخدم محذوف', phone='', phone_hash='deleted:' || id, pin_hash=NULL,
+         telegram_chat_id=NULL, availability=NULL, stage=NULL, is_anonymous=TRUE,
+         deleted_at=now(), updated_at=now()
+       WHERE id=$1`, [u.id]);
+    await client.query('UPDATE users SET collector_id=NULL WHERE collector_id=$1', [u.id]);
+    await client.query('DELETE FROM sessions WHERE user_id=$1', [u.id]);
+    await client.query("UPDATE support_messages SET from_user='مستخدم محذوف', phone=NULL WHERE from_user_id=$1", [u.id]);
+    await client.query('COMMIT');
+    await audit({ actorId: u.id, action: 'delete_own_account', entityType: 'user', entityId: u.id, before: { role: u.role, group_id: u.group_id }, ip: req.ip });
+    res.clearCookie('waman_at', COOKIE_OPTS());
+    res.clearCookie('waman_rt', { ...COOKIE_OPTS(), path: '/api/auth' });
+    res.json({ success: true });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    next(err);
+  } finally { client.release(); }
 });
 
 // POST /api/auth/change-pin
