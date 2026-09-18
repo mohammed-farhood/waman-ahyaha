@@ -17,15 +17,18 @@ fi
 
 echo "=== [1/4] Frontend ==="
 ssh "$HOST" "mkdir -p $APP/frontend/css $APP/frontend/js $APP/frontend/icons $APP/backend $APP/deploy"
-rsync -az --chmod=D755,F644 \
+rsync -az \
   index.html favicon.svg logo.png manifest.json "$HOST:$APP/frontend/"
-rsync -az --delete --chmod=D755,F644 css/ "$HOST:$APP/frontend/css/"
-rsync -az --delete --chmod=D755,F644 icons/ "$HOST:$APP/frontend/icons/"
-rsync -az --delete --chmod=D755,F644 --exclude=vendor/ js/ "$HOST:$APP/frontend/js/"
+rsync -az --delete css/ "$HOST:$APP/frontend/css/"
+rsync -az --delete icons/ "$HOST:$APP/frontend/icons/"
+rsync -az --delete --exclude=vendor/ js/ "$HOST:$APP/frontend/js/"
 
 echo "=== [2/4] Backend + deploy files ==="
-rsync -az --delete --chmod=D755,F644 --exclude=node_modules --exclude=.env backend/ "$HOST:$APP/backend/"
-rsync -az --delete --chmod=D755,F644 deploy/ "$HOST:$APP/deploy/"
+rsync -az --delete --exclude=node_modules --exclude=.env backend/ "$HOST:$APP/backend/"
+rsync -az --delete deploy/ "$HOST:$APP/deploy/"
+# macOS's rsync has no --chmod: normalise ownership/permissions on the server
+# (root owns the code; the app user and nginx only need to read it).
+ssh "$HOST" "chown -R root:root $APP && chmod -R u=rwX,go=rX $APP"
 
 echo "=== [3/4] Install dependencies ==="
 ssh "$HOST" "cd $APP/backend && npm ci --omit=dev --no-audit --no-fund --loglevel=error"

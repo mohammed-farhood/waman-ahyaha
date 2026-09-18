@@ -1,7 +1,40 @@
 # AL-AYN — Deployment Guide
 
 > For the engineer doing the deploy + the Claude Code session helping them.
-> Last updated: 2026-05-16. Tested against backend v2.0.0.
+> Last updated: 2026-09-19. Tested against backend v2.1.0.
+
+## 0. Current production (read this first)
+
+**Live at https://al-ayn.srv1956050.hstgr.cloud** — Hostinger VPS (`ssh sinan-vps`), deployed 2026-09-19.
+Frontend and API are on the **same origin**, which is simpler than the split
+Hugging Face + GitHub Pages layout described in §2–§7 (kept as an alternative).
+
+| What | Where |
+|---|---|
+| Code | `/opt/al-ayn/frontend` (static, served by nginx) and `/opt/al-ayn/backend` |
+| API service | systemd `al-ayn` → Node on `127.0.0.1:7860` (`journalctl -u al-ayn -f`) |
+| Secrets + DB URL | `/etc/al-ayn/al-ayn.env` (root:alayn 0640). Back up `PG_ENC_KEY` / `PHONE_HMAC_KEY` — never change them |
+| Database | local Postgres, db `alayn_prod`, role `alayn_user`, `pgcrypto` enabled |
+| nginx | `/etc/nginx/sites-available/al-ayn.conf` (from `deploy/nginx-al-ayn.conf`), Let's Encrypt cert auto-renews |
+| Backups | `/etc/cron.daily/al-ayn-backup` → `/var/backups/al-ayn/*.dump` (7 days) — restore with `pg_restore` |
+| Telegram | disabled (`TELEGRAM_BOT_TOKEN` empty). To enable: put the token in the env file, `systemctl restart al-ayn`, and stop any old Hugging Face copy polling the same bot |
+
+**Redeploy after changing code** (from the repo root on the Mac, after committing):
+
+```bash
+bash deploy/deploy.sh      # copies files, npm ci, restarts, prints /health
+```
+
+Bump the `?v=NN` numbers in `index.html` whenever JS/CSS changes (static files are cached 7 days).
+
+**Superadmins**: created with `deploy/bootstrap-superadmin.sh` from the `SUPERADMIN_*` values in the
+env file (PIN lines are blanked afterwards). To reset a forgotten superadmin password: put the phone and
+a new PIN back into the env file, run `ssh sinan-vps bash /opt/al-ayn/deploy/bootstrap-superadmin.sh`,
+then blank the PIN line again.
+
+**Fresh server from scratch**: `bash deploy/deploy.sh`, then `ssh sinan-vps bash /opt/al-ayn/deploy/setup-server.sh`.
+
+---
 
 This document tells you everything you need to put AL-AYN online safely. Read all of it before starting — it's short for a reason, every section matters.
 
