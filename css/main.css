@@ -1156,3 +1156,30 @@ body[dir="ltr"] .toast { border-right: none; border-left: 4px solid var(--primar
 @media (min-width: 1024px) {
   .container { padding: 0 var(--sp-8); }
 }
+
+/* ── Telegram bot settings ─────────────────────────────── */
+.settings-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--surface); margin-bottom: 12px;
+}
+.tg-status {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 14px; border-radius: var(--r-md); margin-bottom: 14px;
+  border: 1px solid transparent; line-height: 1.6;
+}
+.tg-status .icon { flex-shrink: 0; margin-top: 3px; }
+.tg-status a { font-weight: 700; }
+.tg-status-ok   { background: var(--success-bg); border-color: var(--success); color: var(--text-body); }
+.tg-status-ok .icon { color: var(--success); }
+.tg-status-info { background: var(--primary-bg); border-color: var(--primary); color: var(--text-body); }
+.tg-status-info .icon { color: var(--primary); }
+.tg-status-warn { background: var(--warning-bg); border-color: var(--warning); color: var(--text-body); }
+.tg-status-warn .icon { color: var(--warning); }
+.tg-howto {
+  border: 1px dashed var(--border-strong); border-radius: var(--r-md);
+  padding: 10px 14px; margin-bottom: 14px; font-size: .875rem;
+}
+.tg-howto summary { cursor: pointer; font-weight: 700; color: var(--primary); }
+.tg-howto ol { margin: 10px 18px 2px; padding: 0; line-height: 1.9; color: var(--text-body); }
+.tg-howto code { background: var(--gray-50); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: .8rem; }

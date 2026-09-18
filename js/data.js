@@ -98,6 +98,7 @@ const DB = {
       monthlyGoal:      g.monthly_goal      ?? g.monthlyGoal      ?? 0,
       defaultPledge:    g.default_pledge    ?? g.defaultPledge    ?? 5000,
       createdAt:        g.created_at        ?? g.createdAt,
+      botUsername:      g.bot_username      ?? g.botUsername      ?? null,
     };
   },
   normAnnouncement(a) {

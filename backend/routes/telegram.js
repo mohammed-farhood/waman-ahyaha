@@ -2,8 +2,10 @@ const express = require('express');
 const crypto  = require('crypto');
 const pool    = require('../db/pool');
 const { roleRequired } = require('../middleware/auth');
-const { reminderQueue, getDefaultUsername } = require('../services/telegramBot');
+const tg = require('../services/telegramBot');
+const { reminderQueue } = tg;
 const { body: validate } = require('../middleware/validate');
+const { write: audit } = require('../services/audit');
 const { telegramLimiter } = require('../middleware/rateLimit');
 const { z } = require('zod');
 
@@ -56,20 +58,10 @@ router.post('/auth-code', telegramLimiter, async (req, res, next) => {
       [code, 'pending', groupId]
     );
 
-    // Resolve the bot username to use
-    let botUsername = getDefaultUsername();
-    if (groupId) {
-      const { rows } = await pool.query(
-        'SELECT telegram_bot_token_enc IS NOT NULL AS has_custom FROM groups WHERE id=$1', [groupId]
-      );
-      if (rows[0]?.has_custom) {
-        try {
-          const { getOrCreateCampaignBot } = require('../services/telegramBot');
-          const entry = await getOrCreateCampaignBot(groupId);
-          botUsername = entry.username;
-        } catch {}
-      }
-    }
+    // The campaign's own bot if it has one, otherwise the platform default.
+    let botUsername = '';
+    try { botUsername = (await tg.getOrCreateCampaignBot(groupId)).username; }
+    catch (e) { console.error('[BOT] auth-code bot start failed:', e.message); }
 
     if (!botUsername) {
       return res.status(503).json({ success: false, error: 'telegram bot not configured' });
@@ -154,6 +146,30 @@ router.post('/notify-location', ...roleRequired(...STAFF), telegramLimiter, vali
       .map(chatId => ({ chatId, text, groupId: req.user.groupId || null }));
     if (messages.length) reminderQueue.add(messages);
     res.json({ success: true, status: 'location_queued', count: messages.length });
+  } catch (err) { next(err); }
+});
+
+// ── Platform default bot (superadmin, from the app's settings) ──
+router.get('/telegram/default-bot', ...roleRequired('superadmin'), (req, res) => {
+  const d = tg.defaultInfo();
+  res.json({ success: true, connected: d.connected, username: d.username, source: d.source });
+});
+
+router.post('/telegram/default-bot', ...roleRequired('superadmin'), validate(z.object({
+  botToken: z.string().trim().regex(/^\d{5,15}:[A-Za-z0-9_-]{30,60}$/, 'invalid bot token'),
+})), async (req, res, next) => {
+  try {
+    const username = await tg.setDefaultBot(req.body.botToken);   // 400 'invalid bot token'
+    await audit({ actorId: req.user.sub, action: 'set_default_bot', entityType: 'system', after: { username }, ip: req.ip });
+    res.json({ success: true, username });
+  } catch (err) { next(err); }
+});
+
+router.delete('/telegram/default-bot', ...roleRequired('superadmin'), async (req, res, next) => {
+  try {
+    await tg.setDefaultBot(null);
+    await audit({ actorId: req.user.sub, action: 'remove_default_bot', entityType: 'system', ip: req.ip });
+    res.json({ success: true, ...tg.defaultInfo() });
   } catch (err) { next(err); }
 });
 

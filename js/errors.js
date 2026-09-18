@@ -60,6 +60,7 @@ const Errors = {
     'forbidden: not your donor':         'هذا المتبرع ليس ضمن قائمتك',
     'forbidden: chat not in this campaign': 'لا يمكن الإرسال لمستخدم خارج الحملة',
     'telegram bot not configured':       'بوت التليجرام غير مفعّل حالياً',
+    'invalid bot token':                 'التوكن غير صالح — تأكد أنك نسخته كاملاً من BotFather',
     'code not linked':                   'لم يكتمل الربط مع التليجرام، حاول مجدداً',
     'content or image required':         'الرجاء كتابة المحتوى أو إرفاق صورة',
     'groupId required':                  'يرجى اختيار الحملة',
@@ -139,6 +140,7 @@ const Errors = {
       if (/^Invalid enum value/i.test(detail)) return `${label}: قيمة غير مسموح بها`;
       if (/invalid phone/i.test(detail))       return `${label}: رقم هاتف غير صالح`;
       if (/PIN too weak/i.test(detail))        return this._exact['PIN too weak'];
+      if (/invalid bot token/i.test(detail))   return this._exact['invalid bot token'];
       if (/content or image required/i.test(detail)) return this._exact['content or image required'];
       // Fall through to raw if the detail shape is unknown
     }

@@ -626,7 +626,7 @@ const App = {
           </div>
         </div>
 
-        ${(!user.telegramChatId && user.role === 'donor') ? `
+        ${(!user.telegramChatId && user.role === 'donor' && group?.botUsername) ? `
         <div class="card fade-up delay-2" style="margin-bottom:16px;background:rgba(212,167,44,.1);border:1px solid var(--gold);display:flex;align-items:center;gap:12px;cursor:pointer" onclick="App.navigate('profile')">
           <div style="background:var(--gold);color:white;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">${Icons.telegram}</div>
           <div style="flex:1">
@@ -1449,13 +1449,12 @@ const App = {
     btn.disabled = true;
 
     try {
-      const group = DB.getGroup(this._getEffectiveGroupId());
-      const groupBotToken = group?.telegramBotToken || '';
       const data = await API.post('/api/auth-code', {});
       if (!data.success) throw new Error('Api failed');
 
       const code = data.code;
-      const botUsername = data.botUsername || 'alayn_mucom_whamenahyahha_bot';
+      const botUsername = data.botUsername;
+      if (!botUsername) throw new Error('telegram bot not configured');
       const botUrl = `https://t.me/${botUsername}?start=${code}`;
       
       btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.telegram}</span> بانتظار التأكيد على تليجرام...`;
@@ -1831,7 +1830,7 @@ const App = {
           </button>
         </div>` : ''}
 
-        ${user.role === 'donor' ? (!user.telegramChatId ? `
+        ${user.role === 'donor' && group?.botUsername ? (!user.telegramChatId ? `
         <div class="card fade-up delay-1" id="tg-link-card" style="margin-bottom:16px;background:var(--warning-bg);border:1px solid var(--warning)">
           <h4 style="color:var(--warning);margin-bottom:8px">الربط بالتليجرام</h4>
           <p class="text-sm" style="color:var(--warning-dark);margin-bottom:12px">لن نتمكن من إرسال إشعارات التذكير إليك بصورة آلية ما لم تقم بربط حسابك ببوت التليجرام الخاص بالحملة.</p>
@@ -1863,6 +1862,9 @@ const App = {
           <button class="btn btn-outline w-full" style="margin-bottom:8px" onclick="App.showAddCollectorModal()">
             <span class="icon icon-sm">${Icons.plus}</span> إضافة جامع تبرعات
           </button>
+          <button class="btn btn-outline w-full" style="margin-bottom:8px" onclick="App.showTelegramBotModal('${user.groupId}')">
+            <span class="icon icon-sm">${Icons.telegram}</span> بوت التليجرام للحملة
+          </button>
           <button class="btn btn-ghost w-full" onclick="App.exportData()">
             <span class="icon icon-sm">${Icons.download}</span> تصدير البيانات (JSON)
           </button>
@@ -1889,6 +1891,13 @@ const App = {
 
           <button class="btn btn-ghost w-full" onclick="App.showBackupHistoryModal()">
             <span class="icon icon-sm">${Icons.clock}</span> سجل النسخ الاحتياطية
+          </button>
+        </div>
+        <div class="card fade-up delay-3" style="margin-bottom:16px">
+          <h4 style="margin-bottom:6px">تليجرام</h4>
+          <p class="text-sm text-muted" style="margin-bottom:12px">بوت عام تستخدمه الحملات التي لم تضف بوتاً خاصاً بها. لكل حملة بوتها من زر الإعدادات على بطاقتها.</p>
+          <button class="btn btn-outline w-full" onclick="App.showTelegramBotModal(null)">
+            <span class="icon icon-sm">${Icons.telegram}</span> بوت التليجرام الافتراضي
           </button>
         </div>` : ''}
 
@@ -2697,7 +2706,7 @@ const App = {
           </div>
           <div class="form-group" style="margin-bottom:0">
             <label class="form-label">رمز الدخول (PIN)</label>
-            <input type="password" id="new-camp-admin-pin" class="form-input" value="0000" maxlength="4" dir="ltr" style="text-align:center;letter-spacing:8px">
+            <input type="password" id="new-camp-admin-pin" class="form-input" placeholder="4 أرقام أو أكثر" maxlength="20" inputmode="numeric" autocomplete="new-password" dir="ltr" style="text-align:center;letter-spacing:4px">
           </div>
         </div>
 
@@ -2708,7 +2717,7 @@ const App = {
           <div class="form-group" style="margin-bottom:0">
             <label class="form-label">توكن البوت الخاص بالحملة</label>
             <input type="text" id="new-camp-bot-token" class="form-input" placeholder="123456:ABC-DEFxxxxxxxxxxxxxxx" dir="ltr" style="font-size:.8rem">
-            <div class="form-hint" style="margin-top:4px;color:var(--text-muted);font-size:.78rem">اختياري — أنشئ بوتاً عبر @BotFather وألصق توكنه هنا. إذا تُرك فارغاً يُستخدم البوت الافتراضي.</div>
+            <div class="form-hint" style="margin-top:4px;color:var(--text-muted);font-size:.78rem">اختياري — أنشئ بوتاً عبر @BotFather وألصق توكنه هنا، أو أضفه لاحقاً من إعدادات الحملة. إذا تُرك فارغاً يُستخدم البوت الافتراضي للمنصة.</div>
           </div>
         </div>
       </div>
@@ -2784,8 +2793,21 @@ const App = {
         _noSync: true,
       });
 
+      // Optional campaign bot: a bad token must not undo a created campaign.
+      const botToken = (document.getElementById('new-camp-bot-token')?.value || '').trim();
+      let botNote = '';
+      if (botToken) {
+        try {
+          const b = await API.post(`/api/groups/${serverGroup.id}/bot-token`, { botToken });
+          botNote = ` — البوت @${b.username} مفعّل`;
+          await DB.refreshGroups();
+        } catch (e) {
+          this.toast('تم إنشاء الحملة، لكن توكن البوت لم يُقبل: ' + (e.message || '') + ' — يمكنك إضافته من إعدادات الحملة', 'warning');
+        }
+      }
+
       this.closeModal();
-      this.toast('تم إنشاء الحملة بنجاح!');
+      this.toast('تم إنشاء الحملة بنجاح!' + botNote);
       this.renderHome();
     } catch (err) {
       const msg = err.message || 'فشل إنشاء الحملة';
@@ -2797,6 +2819,117 @@ const App = {
       // msg is already translated to Arabic by apiClient → Errors.t.
       this.toast(msg, 'error');
       if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'إنشاء واعتماد الحملة'; }
+    }
+  },
+
+  // ─────────────────────────────────────────────────────────
+  // TELEGRAM BOT SETTINGS — a campaign's own bot, or (groupId = null)
+  // the platform default bot used by campaigns without their own.
+  // ─────────────────────────────────────────────────────────
+  async showTelegramBotModal(groupId = null) {
+    const isDefault = !groupId;
+    const group = groupId ? DB.getGroup(groupId) : null;
+    const title = isDefault ? 'بوت التليجرام الافتراضي للمنصة' : 'بوت التليجرام للحملة';
+    this._openModal(`
+      <div class="modal-header"><div class="modal-title">${title}</div></div>
+      <div id="tgbot-body" class="text-center text-muted" style="padding:24px">جاري التحميل…</div>`);
+
+    let st;
+    try {
+      st = isDefault ? await API.get('/api/telegram/default-bot')
+                     : await API.get(`/api/groups/${encodeURIComponent(groupId)}/telegram`);
+    } catch (e) {
+      this.closeModal();
+      return this.toast(e.message || 'تعذر تحميل إعدادات البوت', 'error');
+    }
+    const body = document.getElementById('tgbot-body');
+    if (!body) return;
+
+    const current  = isDefault ? (st.connected ? st.username : null) : st.ownBot;
+    const fallback = isDefault ? null : st.defaultBot;
+    const botLink  = (u) => `<a href="https://t.me/${encodeURIComponent(u)}" target="_blank" rel="noopener" dir="ltr">@${this.esc(u)}</a>`;
+
+    let statusHtml;
+    if (current) {
+      statusHtml = `<div class="tg-status tg-status-ok"><span class="icon icon-sm">${Icons.check}</span>
+        <div><div style="font-weight:700">البوت مفعّل: ${botLink(current)}</div>
+        <div class="text-xs">${isDefault
+          ? (st.source === 'env' ? 'مضبوط من ملف إعدادات الخادم. أي توكن تحفظه هنا يحل محله.' : 'تستخدمه الحملات التي ليس لها بوت خاص.')
+          : 'التذكيرات والإيصالات وربط حسابات المتبرعين تتم عبر هذا البوت.'}</div></div></div>`;
+    } else if (fallback) {
+      statusHtml = `<div class="tg-status tg-status-info"><span class="icon icon-sm">${Icons.telegram}</span>
+        <div><div style="font-weight:700">تستخدم الحملة بوت المنصة ${botLink(fallback)}</div>
+        <div class="text-xs">يمكنك إضافة بوت خاص باسم حملتك بدلاً منه.</div></div></div>`;
+    } else {
+      statusHtml = `<div class="tg-status tg-status-warn"><span class="icon icon-sm">${Icons.telegram}</span>
+        <div><div style="font-weight:700">لا يوجد بوت مفعّل</div>
+        <div class="text-xs">تذكيرات التليجرام والإيصالات وربط حسابات المتبرعين متوقفة حتى تضيف بوتاً.</div></div></div>`;
+    }
+
+    body.className = '';
+    body.style.padding = '0';
+    body.innerHTML = `
+      ${group ? `<div class="text-sm text-muted" style="margin-bottom:12px;text-align:center">${this.esc(group.name)}</div>` : ''}
+      ${statusHtml}
+      <details class="tg-howto" ${current ? '' : 'open'}>
+        <summary>كيف أحصل على توكن البوت؟ (دقيقة واحدة)</summary>
+        <ol>
+          <li>افتح تليجرام وابحث عن <a href="https://t.me/BotFather" target="_blank" rel="noopener" dir="ltr">@BotFather</a> (عليه علامة التوثيق الزرقاء).</li>
+          <li>أرسل له الأمر <code dir="ltr">/newbot</code> ثم اكتب اسماً للبوت، ثم معرّفاً إنكليزياً ينتهي بـ <code dir="ltr">bot</code>.</li>
+          <li>سيرسل لك رسالة فيها التوكن مثل <code dir="ltr">123456789:AAH…</code> — انسخه كاملاً وألصقه في الأسفل.</li>
+        </ol>
+      </details>
+      <div class="form-group">
+        <label class="form-label" for="tgbot-token">${current ? 'استبدال التوكن' : 'توكن البوت'}</label>
+        <input type="text" id="tgbot-token" class="form-input" dir="ltr" autocomplete="off" autocapitalize="off" spellcheck="false"
+               placeholder="123456789:AAH..." style="font-size:.85rem;text-align:left"
+               onkeyup="if(event.key==='Enter')App.saveTelegramBot(${groupId ? `'${this.esc(groupId)}'` : 'null'})">
+        <div class="text-xs text-muted" style="margin-top:6px">نتحقق من التوكن مع تليجرام قبل الحفظ، ويُحفظ مشفّراً ولا يظهر لأحد بعدها.</div>
+      </div>
+      <button id="tgbot-save" class="btn btn-primary w-full" onclick="App.saveTelegramBot(${groupId ? `'${this.esc(groupId)}'` : 'null'})">
+        <span class="icon icon-sm icon-white">${Icons.telegram}</span> حفظ وتفعيل البوت
+      </button>
+      ${current && !(isDefault && st.source === 'env') ? `
+      <button id="tgbot-remove" class="btn btn-ghost w-full" style="margin-top:8px;color:var(--danger)" onclick="App.removeTelegramBot(${groupId ? `'${this.esc(groupId)}'` : 'null'})">
+        إزالة البوت${isDefault ? '' : (fallback ? ' (والرجوع لبوت المنصة)' : '')}
+      </button>` : ''}
+      <button class="btn btn-outline w-full" style="margin-top:8px" onclick="App.closeModal()">إغلاق</button>`;
+    setTimeout(() => { if (!current) document.getElementById('tgbot-token')?.focus(); }, 100);
+  },
+
+  async saveTelegramBot(groupId = null) {
+    const token = (document.getElementById('tgbot-token')?.value || '').trim();
+    if (!/^\d{5,15}:[A-Za-z0-9_-]{30,60}$/.test(token)) {
+      return this.toast('التوكن غير صحيح — انسخه كاملاً من رسالة BotFather', 'error');
+    }
+    const btn = document.getElementById('tgbot-save');
+    if (btn) { btn.disabled = true; btn.textContent = 'جاري التحقق من التوكن…'; }
+    try {
+      const r = groupId
+        ? await API.post(`/api/groups/${encodeURIComponent(groupId)}/bot-token`, { botToken: token })
+        : await API.post('/api/telegram/default-bot', { botToken: token });
+      await DB.refreshGroups();
+      this.toast(`تم تفعيل البوت @${r.username} ✓`);
+      this.showTelegramBotModal(groupId);
+    } catch (e) {
+      this.toast(e.message || 'تعذر حفظ التوكن', 'error');
+      if (btn) { btn.disabled = false; btn.innerHTML = `<span class="icon icon-sm icon-white">${Icons.telegram}</span> حفظ وتفعيل البوت`; }
+    }
+  },
+
+  async removeTelegramBot(groupId = null) {
+    if (!confirm('إزالة هذا البوت؟ لن تصل التذكيرات عبره بعد الآن.')) return;
+    const btn = document.getElementById('tgbot-remove');
+    if (btn) { btn.disabled = true; btn.textContent = 'جاري الإزالة…'; }
+    try {
+      if (groupId) await API.del(`/api/groups/${encodeURIComponent(groupId)}/bot-token`);
+      else await API.del('/api/telegram/default-bot');
+      await DB.refreshGroups();
+      this.toast('تمت إزالة البوت');
+      this.showTelegramBotModal(groupId);
+    } catch (e) {
+      this.toast(e.message || 'تعذرت الإزالة', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'إزالة البوت'; }
     }
   },
 
@@ -2822,6 +2955,17 @@ const App = {
         <div style="background:var(--primary-bg);padding:14px;border-radius:var(--r-md);margin-bottom:16px">
           <div style="font-weight:700;font-size:1.05rem;color:var(--text-heading);margin-bottom:4px">${this.esc(group.name)}</div>
           <div class="text-sm text-muted">${this.esc(group.university || '')}</div>
+        </div>
+
+        <div class="settings-row">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <span class="icon icon-sm" style="color:var(--primary)">${Icons.telegram}</span>
+            <div style="min-width:0">
+              <div style="font-weight:700">بوت التليجرام</div>
+              <div class="text-xs text-muted" dir="auto">${group.botUsername ? '@' + this.esc(group.botUsername) : 'غير مفعّل'}</div>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="App.showTelegramBotModal('${groupId}')">إدارة</button>
         </div>
 
         <div style="margin-top:24px;border:1px solid var(--danger);border-radius:var(--r-md);padding:14px;background:rgba(220,38,38,.04)">

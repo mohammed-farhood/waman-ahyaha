@@ -3,6 +3,10 @@ const bcrypt  = require('bcryptjs');
 const pool    = require('../db/pool');
 const { authRequired, roleRequired, assertGroup } = require('../middleware/auth');
 const { monthKey, MONTH_RE } = require('../services/month');
+const tg = require('../services/telegramBot');
+
+// Accept any plausible token shape; Telegram itself (getMe) is the real check.
+const BOT_TOKEN_RE = /^\d{5,15}:[A-Za-z0-9_-]{30,60}$/;
 const { write: audit }               = require('../services/audit');
 const { body: validate }             = require('../middleware/validate');
 const { z } = require('zod');
@@ -20,10 +24,14 @@ router.get('/', async (req, res, next) => {
          (SELECT COUNT(*)::int FROM users u
            WHERE u.group_id=g.id AND u.role='donor' AND u.deleted_at IS NULL) AS donor_count,
          COALESCE((SELECT json_agg(json_build_object('id',u.id,'name',u.name) ORDER BY u.name) FROM users u
-           WHERE u.group_id=g.id AND u.role='collector' AND u.deleted_at IS NULL), '[]'::json) AS collectors
+           WHERE u.group_id=g.id AND u.role='collector' AND u.deleted_at IS NULL), '[]'::json) AS collectors,
+         g.telegram_bot_username
        FROM groups g WHERE g.deleted_at IS NULL ORDER BY g.created_at`
     );
-    res.json({ success: true, groups: rows });
+    // bot_username: the bot donors link to (the campaign's own, else the platform default).
+    const def = tg.getDefaultUsername() || null;
+    const groups = rows.map(({ telegram_bot_username, ...g }) => ({ ...g, bot_username: telegram_bot_username || def }));
+    res.json({ success: true, groups });
   } catch (err) { next(err); }
 });
 
@@ -153,12 +161,14 @@ router.post('/:id/full-delete', ...roleRequired('superadmin'), validate(z.object
     //    donations & orphans use ON DELETE RESTRICT on group_id → must clear them first.
     //    users use ON DELETE SET NULL → also explicit so the group's admins/collectors/donors go.
     //    announcements + pay_reports cascade automatically when the group row dies.
+    const botToken = await tg.campaignToken(req.params.id).catch(() => null);
     await client.query('BEGIN');
     await client.query('DELETE FROM donations WHERE group_id=$1', [req.params.id]);
     await client.query('DELETE FROM orphans   WHERE group_id=$1', [req.params.id]);
     await client.query('DELETE FROM users     WHERE group_id=$1', [req.params.id]);
     await client.query('DELETE FROM groups    WHERE id=$1',       [req.params.id]);
     await client.query('COMMIT');
+    await tg.replaceCampaignBot(botToken, null).catch(() => {});
 
     await audit({
       actorId:    req.user.sub,
@@ -179,20 +189,56 @@ router.post('/:id/full-delete', ...roleRequired('superadmin'), validate(z.object
   }
 });
 
-// POST /api/groups/:id/bot-token  (admin/superadmin — store bot token encrypted)
+// GET /api/groups/:id/telegram  (admin of the campaign / superadmin) — bot status
+router.get('/:id/telegram', ...roleRequired('admin', 'superadmin'), async (req, res, next) => {
+  try {
+    if (!assertGroup(req, res, req.params.id)) return;
+    const { rows } = await pool.query(
+      'SELECT telegram_bot_token_enc IS NOT NULL AS has_own, telegram_bot_username FROM groups WHERE id=$1 AND deleted_at IS NULL',
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ success: false, error: 'not found' });
+    const def = tg.defaultInfo();
+    res.json({
+      success: true,
+      ownBot: rows[0].has_own ? rows[0].telegram_bot_username || '' : null,
+      defaultBot: def.connected ? def.username : null,
+    });
+  } catch (err) { next(err); }
+});
+
+// POST /api/groups/:id/bot-token  (admin of the campaign / superadmin)
+// Checks the token with Telegram first, then stores it encrypted and starts the bot.
 router.post('/:id/bot-token', ...roleRequired('admin', 'superadmin'), validate(z.object({
-  botToken: z.string().regex(/^\d{8,10}:[A-Za-z0-9_-]{35}$/, 'invalid bot token format'),
+  botToken: z.string().trim().regex(BOT_TOKEN_RE, 'invalid bot token'),
 })), async (req, res, next) => {
   try {
     if (!assertGroup(req, res, req.params.id)) return;
     const key = process.env.PG_ENC_KEY;
     if (!key) return res.status(500).json({ success: false, error: 'encryption key not configured' });
+    const oldToken = await tg.campaignToken(req.params.id);
+    const username = await tg.verifyToken(req.body.botToken);      // 400 'invalid bot token'
     const r = await pool.query(
-      'UPDATE groups SET telegram_bot_token_enc=pgp_sym_encrypt($1,$2) WHERE id=$3 AND deleted_at IS NULL',
-      [req.body.botToken, key, req.params.id]
+      'UPDATE groups SET telegram_bot_token_enc=pgp_sym_encrypt($1,$2), telegram_bot_username=$3 WHERE id=$4 AND deleted_at IS NULL',
+      [req.body.botToken, key, username, req.params.id]
     );
     if (!r.rowCount) return res.status(404).json({ success: false, error: 'not found' });
-    await audit({ actorId: req.user.sub, action: 'set_bot_token', entityType: 'group', entityId: req.params.id, ip: req.ip });
+    await tg.replaceCampaignBot(oldToken, req.body.botToken);
+    await audit({ actorId: req.user.sub, action: 'set_bot_token', entityType: 'group', entityId: req.params.id, after: { username }, ip: req.ip });
+    res.json({ success: true, username });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/groups/:id/bot-token — back to the platform default bot (if any)
+router.delete('/:id/bot-token', ...roleRequired('admin', 'superadmin'), async (req, res, next) => {
+  try {
+    if (!assertGroup(req, res, req.params.id)) return;
+    const oldToken = await tg.campaignToken(req.params.id);
+    await pool.query(
+      'UPDATE groups SET telegram_bot_token_enc=NULL, telegram_bot_username=NULL WHERE id=$1', [req.params.id]
+    );
+    await tg.replaceCampaignBot(oldToken, null);
+    await audit({ actorId: req.user.sub, action: 'remove_bot_token', entityType: 'group', entityId: req.params.id, ip: req.ip });
     res.json({ success: true });
   } catch (err) { next(err); }
 });

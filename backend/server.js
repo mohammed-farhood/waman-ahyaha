@@ -10,7 +10,8 @@ const host = process.env.HOST || '0.0.0.0';
 
 async function main() {
   await runner.up();
-  tg.init();
+  // Bots start in the background; a Telegram outage must not block the API.
+  tg.init().catch(e => console.error('[BOT] init failed:', e.message));
   app.listen(port, host, () => {
     console.log(`[SERVER] Running on http://${host}:${port}`);
     console.log(`[ENV] NODE_ENV=${process.env.NODE_ENV} COOKIE_SECURE=${process.env.COOKIE_SECURE}`);
