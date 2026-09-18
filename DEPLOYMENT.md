@@ -17,7 +17,7 @@ Hugging Face + GitHub Pages layout described in §2–§7 (kept as an alternativ
 | Database | local Postgres, db `waman_prod`, role `waman_user`, `pgcrypto` enabled |
 | nginx | `/etc/nginx/sites-available/waman-ahyaha.conf` (from `deploy/nginx-waman-ahyaha.conf`), Let's Encrypt cert auto-renews |
 | Backups | `/etc/cron.daily/waman-ahyaha-backup` → `/var/backups/waman-ahyaha/*.dump` (7 days) — restore with `pg_restore` |
-| Telegram | disabled (`TELEGRAM_BOT_TOKEN` empty). To enable: put the token in the env file, `systemctl restart waman-ahyaha`, and stop any old Hugging Face copy polling the same bot |
+| Telegram | Set in the app, no server access: campaign admin → حسابي → «بوت التليجرام للحملة»; superadmin → a campaign's ⚙ settings, or حسابي → «بوت التليجرام الافتراضي» (platform bot for campaigns without their own). Tokens are checked with Telegram, stored encrypted, and bots start immediately. Only one server may poll a given bot |
 
 **Redeploy after changing code** (from the repo root on the Mac, after committing):
 
