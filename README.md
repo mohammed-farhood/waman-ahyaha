@@ -8,6 +8,8 @@ admins run their campaign, and a superadmin oversees every campaign.
 - **Frontend:** static files at the repo root (`index.html`, `js/`, `css/`) — no build step
 - **Backend:** `backend/` — Node 22, Express 5, PostgreSQL (migrations run on boot)
 - **Deploy / operate:** see [DEPLOYMENT.md](DEPLOYMENT.md) (`bash deploy/deploy.sh`)
+- **Mobile app (iOS + Android):** [`mobile/`](mobile/README.md). Expo / React Native on the same backend; store
+  steps in [mobile/SUBMISSION_GUIDE.md](mobile/SUBMISSION_GUIDE.md)
 
 ## Run locally
 
