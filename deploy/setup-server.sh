@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Waman Ahyaha — one-time server setup on the Hostinger VPS (srv1956050).
+# Waman Ahyaha — one-time server setup (on Ayad's VPS since 2026-10-05).
 # Run as root ON THE SERVER after deploy/deploy.sh has copied the code to /opt/waman-ahyaha:
 #   bash /opt/waman-ahyaha/deploy/setup-server.sh
 #

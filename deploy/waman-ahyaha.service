@@ -13,6 +13,8 @@ EnvironmentFile=/etc/waman-ahyaha/waman-ahyaha.env
 Environment=NODE_ENV=production
 Environment=PORT=7860
 Environment=HOST=127.0.0.1
+# Node 22 from /opt/node22 where the box keeps an older system Node (Ayad's server); /usr/bin otherwise
+Environment=PATH=/opt/node22/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env node server.js
 Restart=always
 RestartSec=3
