@@ -13,6 +13,10 @@ export LC_ALL=C.UTF-8
 DOMAIN=waman-ahyaha.t-plusplus.tech
 APP=/opt/waman-ahyaha
 ENV_FILE=/etc/waman-ahyaha/waman-ahyaha.env
+# The API port: kept in the env file once chosen; a first setup takes PORT=<n> from the command line (default 7860).
+#   ssh ayad PORT=7870 bash /opt/waman-ahyaha/deploy/setup-server.sh   (Ayad's server: 7860 is another app's)
+[ -f "$ENV_FILE" ] && grep -q '^PORT=' "$ENV_FILE" && PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE")
+PORT=${PORT:-7860}
 
 echo "=== [1/6] System user + folders ==="
 id waman >/dev/null 2>&1 || useradd --system --home "$APP" --shell /usr/sbin/nologin waman
@@ -38,6 +42,7 @@ JWT_SECRET=$(openssl rand -hex 48)
 PG_ENC_KEY=$(openssl rand -hex 32)
 PHONE_HMAC_KEY=$(openssl rand -hex 32)
 API_SECRET=$(openssl rand -hex 32)
+PORT=${PORT}
 COOKIE_SECURE=true
 COOKIE_SAMESITE=Strict
 CORS_ORIGIN=https://${DOMAIN}
@@ -60,13 +65,14 @@ install -m 644 "$APP/deploy/waman-ahyaha.service" /etc/systemd/system/waman-ahya
 systemctl daemon-reload
 systemctl enable --now waman-ahyaha
 sleep 3
-curl -fsS http://127.0.0.1:7860/health && echo
+curl -fsS http://127.0.0.1:$PORT/health && echo
 
 echo "=== [5/6] TLS certificate + nginx ==="
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
   certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
 fi
-install -m 644 "$APP/deploy/nginx-waman-ahyaha.conf" /etc/nginx/sites-available/waman-ahyaha.conf
+sed "s/127.0.0.1:7860/127.0.0.1:$PORT/g" "$APP/deploy/nginx-waman-ahyaha.conf" > /etc/nginx/sites-available/waman-ahyaha.conf
+chmod 644 /etc/nginx/sites-available/waman-ahyaha.conf
 ln -sf /etc/nginx/sites-available/waman-ahyaha.conf /etc/nginx/sites-enabled/waman-ahyaha.conf
 nginx -t && systemctl reload nginx
 
