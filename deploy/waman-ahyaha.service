@@ -1,5 +1,5 @@
 [Unit]
-Description=Waman Ahyaha donation tracker API (waman-ahyaha.srv1956050.hstgr.cloud)
+Description=Waman Ahyaha donation tracker API (waman-ahyaha.t-plusplus.tech)
 After=network.target postgresql.service
 Wants=postgresql.service
 

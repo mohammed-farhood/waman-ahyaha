@@ -10,7 +10,7 @@
 set -euo pipefail
 export LC_ALL=C.UTF-8
 
-DOMAIN=waman-ahyaha.srv1956050.hstgr.cloud
+DOMAIN=waman-ahyaha.t-plusplus.tech
 APP=/opt/waman-ahyaha
 ENV_FILE=/etc/waman-ahyaha/waman-ahyaha.env
 
