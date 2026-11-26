@@ -5,7 +5,7 @@
 
 ## 0. Current production (read this first)
 
-**Live at https://waman-ahyaha.t-plusplus.tech** — Hostinger VPS (`ssh ayad`), deployed 2026-09-19.
+**Live at https://waman-ahyaha.tech** — own VPS mohammed-3 (2.24.146.94, `ssh mohammed-3`), moved 2026-11-26.
 Frontend and API are on the **same origin**, which is simpler than the split
 Hugging Face + GitHub Pages layout described in §2–§7 (kept as an alternative).
 
@@ -29,10 +29,10 @@ Bump the `?v=NN` numbers in `index.html` whenever JS/CSS changes (static files a
 
 **Superadmins**: created with `deploy/bootstrap-superadmin.sh` from the `SUPERADMIN_*` values in the
 env file (PIN lines are blanked afterwards). To reset a forgotten superadmin password: put the phone and
-a new PIN back into the env file, run `ssh ayad bash /opt/waman-ahyaha/deploy/bootstrap-superadmin.sh`,
+a new PIN back into the env file, run `ssh mohammed-3 bash /opt/waman-ahyaha/deploy/bootstrap-superadmin.sh`,
 then blank the PIN line again.
 
-**Fresh server from scratch**: `bash deploy/deploy.sh`, then `ssh ayad PORT=<free port> bash /opt/waman-ahyaha/deploy/setup-server.sh` (default 7860).
+**Fresh server from scratch**: `bash deploy/deploy.sh`, then `ssh mohammed-3 PORT=<free port> bash /opt/waman-ahyaha/deploy/setup-server.sh` (default 7860).
 
 ---
 

@@ -1,7 +1,7 @@
 # ومن أحياها: mobile app (iOS + Android)
 
 A React Native (Expo SDK 57) app for the **same backend as the website**:
-https://waman-ahyaha.srv1956050.hstgr.cloud. There's no separate server and no second database. A donor, collector
+https://waman-ahyaha.tech. There's no separate server and no second database. A donor, collector
 or admin logs in with the same phone number (and PIN) they use on the website.
 
 To publish to the App Store and Google Play, follow **[SUBMISSION_GUIDE.md](SUBMISSION_GUIDE.md)**.

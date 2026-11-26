@@ -74,8 +74,8 @@
       ]
     ],
     "extra": {
-      "apiUrl": "https://waman-ahyaha.srv1956050.hstgr.cloud",
-      "privacyUrl": "https://waman-ahyaha.srv1956050.hstgr.cloud/privacy.html"
+      "apiUrl": "https://waman-ahyaha.tech",
+      "privacyUrl": "https://waman-ahyaha.tech/privacy.html"
     },
     "experiments": {
       "typedRoutes": true,

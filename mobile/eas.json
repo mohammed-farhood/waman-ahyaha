@@ -11,11 +11,11 @@
     "preview": {
       "distribution": "internal",
       "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_API_URL": "https://waman-ahyaha.srv1956050.hstgr.cloud" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://waman-ahyaha.tech" }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "EXPO_PUBLIC_API_URL": "https://waman-ahyaha.srv1956050.hstgr.cloud" }
+      "env": { "EXPO_PUBLIC_API_URL": "https://waman-ahyaha.tech" }
     }
   },
   "submit": {

@@ -8,7 +8,7 @@ import { getItem, removeItem, setItem } from './storage';
 export const API_URL: string = (
   process.env.EXPO_PUBLIC_API_URL ||
   (Constants.expoConfig?.extra?.apiUrl as string | undefined) ||
-  'https://waman-ahyaha.srv1956050.hstgr.cloud'
+  'https://waman-ahyaha.tech'
 ).replace(/\/+$/, '');
 
 export const PRIVACY_URL: string =

@@ -1,7 +1,7 @@
 # ومن أحياها — publishing to the App Store and Google Play
 
 The app in this folder (`mobile/`) is an Expo (React Native) app. It talks to the **same backend as the website**:
-`https://waman-ahyaha.srv1956050.hstgr.cloud`. The server already supports it: mobile logins,
+`https://waman-ahyaha.tech`. The server already supports it: mobile logins,
 token refresh and in-app account deletion are live. You don't need to change anything on the server.
 
 You need:
@@ -87,8 +87,8 @@ the app doesn't process payments.
 
 **Keywords (iOS, 100 characters max):** كفالة,أيتام,تبرعات,خيري,تطوع,جامعة,صدقة,متابعة,حملة
 
-**Support URL / Marketing URL:** https://waman-ahyaha.srv1956050.hstgr.cloud
-**Privacy policy URL:** https://waman-ahyaha.srv1956050.hstgr.cloud/privacy.html
+**Support URL / Marketing URL:** https://waman-ahyaha.tech
+**Privacy policy URL:** https://waman-ahyaha.tech/privacy.html
 
 **Screenshots:** Apple needs 6.9" iPhone screenshots (1320×2868) and Google needs at least 2 phone
 screenshots. The easiest way: install the preview build and take screenshots of the welcome page, the donor
@@ -108,7 +108,7 @@ home, the collector's grid and the leaderboard.
 - Collects: Name, Phone number (Personal info) and Photos (only staff announcement pictures) for App
   functionality. Data is encrypted in transit (HTTPS).
 - Users can request deletion: **Yes**, in the app (Profile → حذف حسابي) and at
-  https://waman-ahyaha.srv1956050.hstgr.cloud/privacy.html#delete
+  https://waman-ahyaha.tech/privacy.html#delete
 - Shared with third parties: No.
 
 **Account deletion (both stores require it):** Profile → «حذف حسابي». This calls `DELETE /api/auth/me` and

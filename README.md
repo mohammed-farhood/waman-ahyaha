@@ -4,7 +4,7 @@ Monthly orphan-sponsorship tracker for university campaigns (Arabic, RTL PWA).
 Donors pledge a monthly amount, collectors confirm cash payments in a month grid,
 admins run their campaign, and a superadmin oversees every campaign.
 
-- **Live:** https://waman-ahyaha.t-plusplus.tech
+- **Live:** https://waman-ahyaha.tech
 - **Frontend:** static files at the repo root (`index.html`, `js/`, `css/`) — no build step
 - **Backend:** `backend/` — Node 22, Express 5, PostgreSQL (migrations run on boot)
 - **Deploy / operate:** see [DEPLOYMENT.md](DEPLOYMENT.md) (`bash deploy/deploy.sh`)
