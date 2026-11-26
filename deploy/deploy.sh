@@ -4,10 +4,10 @@
 #
 # Copies exactly what is in this folder (commit first!), installs backend
 # dependencies on the server, restarts the API and checks it is healthy.
-# First time only: afterwards run  ssh sinan-vps bash /opt/waman-ahyaha/deploy/setup-server.sh
+# First time only: afterwards run  ssh ayad bash /opt/waman-ahyaha/deploy/setup-server.sh
 set -euo pipefail
 
-HOST=${DEPLOY_HOST:-sinan-vps}
+HOST=${DEPLOY_HOST:-ayad}  # Ayad's VPS since 2026-10-05
 APP=/opt/waman-ahyaha
 cd "$(dirname "$0")/.."
 
@@ -35,7 +35,7 @@ ssh "$HOST" "cd $APP/backend && npm ci --omit=dev --no-audit --no-fund --logleve
 
 echo "=== [4/4] Restart + health check ==="
 ssh "$HOST" "if systemctl list-unit-files waman-ahyaha.service >/dev/null 2>&1 && systemctl is-enabled waman-ahyaha >/dev/null 2>&1; then
-  systemctl restart waman-ahyaha && sleep 3 && curl -fsS http://127.0.0.1:7860/health && echo
+  systemctl restart waman-ahyaha && sleep 3 && curl -fsS http://127.0.0.1:\$(sed -n s/^PORT=//p /etc/waman-ahyaha/waman-ahyaha.env | grep . || echo 7860)/health && echo
 else
   echo '[INFO] Service not installed yet — run: ssh $HOST bash $APP/deploy/setup-server.sh'
 fi"

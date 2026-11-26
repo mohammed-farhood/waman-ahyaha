@@ -5,14 +5,14 @@
 
 ## 0. Current production (read this first)
 
-**Live at https://waman-ahyaha.srv1956050.hstgr.cloud** — Hostinger VPS (`ssh sinan-vps`), deployed 2026-09-19.
+**Live at https://waman-ahyaha.t-plusplus.tech** — Hostinger VPS (`ssh ayad`), deployed 2026-09-19.
 Frontend and API are on the **same origin**, which is simpler than the split
 Hugging Face + GitHub Pages layout described in §2–§7 (kept as an alternative).
 
 | What | Where |
 |---|---|
 | Code | `/opt/waman-ahyaha/frontend` (static, served by nginx) and `/opt/waman-ahyaha/backend` |
-| API service | systemd `waman-ahyaha` → Node on `127.0.0.1:7860` (`journalctl -u waman-ahyaha -f`) |
+| API service | systemd `waman-ahyaha` → Node on `127.0.0.1:<PORT>` (`PORT` in the env file; 7870 on Ayad's server, where 7860 is the old al-ayn copy) (`journalctl -u waman-ahyaha -f`) |
 | Secrets + DB URL | `/etc/waman-ahyaha/waman-ahyaha.env` (root:waman 0640). Back up `PG_ENC_KEY` / `PHONE_HMAC_KEY` — never change them |
 | Database | local Postgres, db `waman_prod`, role `waman_user`, `pgcrypto` enabled |
 | nginx | `/etc/nginx/sites-available/waman-ahyaha.conf` (from `deploy/nginx-waman-ahyaha.conf`), Let's Encrypt cert auto-renews |
@@ -29,10 +29,10 @@ Bump the `?v=NN` numbers in `index.html` whenever JS/CSS changes (static files a
 
 **Superadmins**: created with `deploy/bootstrap-superadmin.sh` from the `SUPERADMIN_*` values in the
 env file (PIN lines are blanked afterwards). To reset a forgotten superadmin password: put the phone and
-a new PIN back into the env file, run `ssh sinan-vps bash /opt/waman-ahyaha/deploy/bootstrap-superadmin.sh`,
+a new PIN back into the env file, run `ssh ayad bash /opt/waman-ahyaha/deploy/bootstrap-superadmin.sh`,
 then blank the PIN line again.
 
-**Fresh server from scratch**: `bash deploy/deploy.sh`, then `ssh sinan-vps bash /opt/waman-ahyaha/deploy/setup-server.sh`.
+**Fresh server from scratch**: `bash deploy/deploy.sh`, then `ssh ayad PORT=<free port> bash /opt/waman-ahyaha/deploy/setup-server.sh` (default 7860).
 
 ---
 
