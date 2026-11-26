@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Waman Ahyaha — one-time server setup (on Ayad's VPS since 2026-10-05).
+# Waman Ahyaha — one-time server setup (on mohammed-3 since 2026-11-26).
 # Run as root ON THE SERVER after deploy/deploy.sh has copied the code to /opt/waman-ahyaha:
 #   bash /opt/waman-ahyaha/deploy/setup-server.sh
 #
@@ -10,11 +10,11 @@
 set -euo pipefail
 export LC_ALL=C.UTF-8
 
-DOMAIN=waman-ahyaha.t-plusplus.tech
+DOMAIN=waman-ahyaha.tech
 APP=/opt/waman-ahyaha
 ENV_FILE=/etc/waman-ahyaha/waman-ahyaha.env
 # The API port: kept in the env file once chosen; a first setup takes PORT=<n> from the command line (default 7860).
-#   ssh ayad PORT=7870 bash /opt/waman-ahyaha/deploy/setup-server.sh   (Ayad's server: 7860 is another app's)
+#   ssh mohammed-3 PORT=7870 bash /opt/waman-ahyaha/deploy/setup-server.sh   (7860 is free on mohammed-3)
 [ -f "$ENV_FILE" ] && grep -q '^PORT=' "$ENV_FILE" && PORT=$(sed -n 's/^PORT=//p' "$ENV_FILE")
 PORT=${PORT:-7860}
 
@@ -69,7 +69,7 @@ curl -fsS http://127.0.0.1:$PORT/health && echo
 
 echo "=== [5/6] TLS certificate + nginx ==="
 if [ ! -d "/etc/letsencrypt/live/$DOMAIN" ]; then
-  certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
+  certbot certonly --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email
 fi
 sed "s/127.0.0.1:7860/127.0.0.1:$PORT/g" "$APP/deploy/nginx-waman-ahyaha.conf" > /etc/nginx/sites-available/waman-ahyaha.conf
 chmod 644 /etc/nginx/sites-available/waman-ahyaha.conf
